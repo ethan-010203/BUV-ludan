@@ -1,0 +1,97 @@
+{
+  "countries": {
+    "Poland": { "label": "波兰 (Poland)" }
+  },
+  "registrations": {
+    "China": { "label": "中国大陆 (China Mainland)" }
+  },
+  "requirements": {
+    "Poland|China": {
+      "label": "波兰 - 中国大陆注册",
+
+      "addressLocale": "zh-CN",
+      "autofillModule": "poland_seller_center",
+      "xlsxTemplate": "basic_info_v1",
+      "aiDocTypes": [
+        "cn_business_license",
+        "cn_id_card_front",
+        "cn_id_card_back",
+        "cn_tax_cert"
+      ],
+
+      "fields": [
+        { "key": "id_card_front", "label": "身份证正面", "required": true },
+        { "key": "id_card_back", "label": "身份证反面", "required": true },
+        { "key": "business_license", "label": "营业执照", "required": true },
+        { "key": "tax_certificate", "label": "完税证明", "required": true },
+        { "key": "shop_backend_screenshot", "label": "店铺后台截图", "required": true },
+        { "key": "basic_info", "label": "基础信息表", "required": true }
+      ],
+
+      "files": [
+        { "pattern": "身份证正面", "label": "身份证正面", "required": true, "matchType": "contains" },
+        { "pattern": "身份证反面", "label": "身份证反面", "required": true, "matchType": "contains" },
+        { "pattern": "营业执照", "label": "营业执照", "required": true, "matchType": "contains" },
+        { "pattern": "完税证明", "label": "完税证明", "required": true, "matchType": "contains" },
+        { "pattern": "店铺后台截图", "label": "店铺后台截图", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"] },
+        { "pattern": ".xlsx", "label": "基础信息表", "required": true, "matchType": "endsWith" }
+      ],
+
+      "placeholders": {
+        "完税证明":     { "kind": "pdf", "filename": "完税证明_临时占位.pdf",     "text": "完税证明（临时占位）" },
+        "店铺后台截图": { "kind": "png", "filename": "店铺后台截图_临时占位.png", "text": "店铺后台截图（临时占位）" }
+      },
+
+      "modules": [
+        {
+          "title": "公司信息",
+          "fields": [
+            { "key": "公司名称",                       "source": "xlsx",       "cell": "C3" },
+            { "key": "营业执照",                       "source": "file_path",  "label": "营业执照" },
+            { "key": "中国税收居民身份证明",           "source": "file_path",  "label": "完税证明" },
+            { "key": "营业执照号码/注册号",            "source": "xlsx",       "cell": "C10" },
+            { "key": "公司类型",                       "source": "ai_license", "aiField": "类型" },
+            { "key": "营业期限",                       "source": "default",    "value": "长期" },
+            { "key": "公司成立日期",                   "source": "ai_license", "aiField": "成立日期" },
+            { "key": "营业执照签发机关",               "source": "ai_license", "aiField": "登记机关" },
+            { "key": "登记机关所在地税务局名称",       "source": "default",    "value": "国家税务总局" },
+            { "key": "登记机关所在地税务局地址",       "source": "default",    "value": "北京市海淀区羊坊店西路5号" },
+            { "key": "登记机关所在地法院名称",         "source": "default",    "value": "/" },
+            { "key": "登记机关所在地法院地址",         "source": "default",    "value": "北京市 / 市辖区 / 海淀区" },
+            { "key": "公司/个体经营注册地址(中文)",    "source": "ai_license", "aiField": "住所" },
+            { "key": "邮编",                           "source": "xlsx",       "cell": "C11" },
+            { "key": "注册资本",                       "source": "ai_license", "aiField": "注册资本", "defaultValue": "100000" }
+          ]
+        },
+        {
+          "title": "法人代表信息",
+          "fields": [
+            { "key": "上传法人代表证件信息",           "source": "idcard_or_passport" },
+            { "key": "法人代表身份证（人像面）",       "source": "file_path",       "label": "身份证正面" },
+            { "key": "法人代表身份证（国徽面）",       "source": "file_path",       "label": "身份证反面" },
+            { "key": "法人/个人代表中文名",            "source": "ai_idcard_front", "aiField": "姓名" },
+            { "key": "法人/个人代表身份证号",          "source": "ai_idcard_front", "aiField": "身份证号" },
+            { "key": "法人/个人代表拼音名（英文名）",  "source": "ai_idcard_front", "aiField": "拼音名" },
+            { "key": "法人/个人代表出生日期",          "source": "ai_idcard_front", "aiField": "出生日期" },
+            { "key": "法人代表身份证有效期限",         "source": "ai_idcard_back",  "aiField": "有效期限" },
+            { "key": "法人/个人代表身份证地址",        "source": "ai_idcard_front", "aiField": "住址" },
+            { "key": "法人/个人代表身份证邮编",        "source": "postal_from_idcard_address" },
+            { "key": "性别",                           "source": "ai_idcard_front", "aiField": "性别" },
+            { "key": "法人国籍",                       "source": "default",         "value": "中国籍" }
+          ]
+        },
+        {
+          "title": "店铺信息",
+          "fields": [
+            { "key": "销售平台",                          "source": "default", "value": "" },
+            { "key": "店铺链接",                          "source": "xlsx",    "cell": "C14" },
+            { "key": "公司（个人）店铺主要经营范围",      "source": "default", "value": "电子商品 electrical products" },
+            { "key": "公司英文名称",                      "source": "xlsx",    "cell": "C4" },
+            { "key": "公司/个体经营注册地址（英文）",     "source": "xlsx",    "cell": "C5" },
+            { "key": "联系邮箱",                          "source": "xlsx",    "cell": "C20" }
+          ]
+        }
+      ]
+    }
+  }
+}

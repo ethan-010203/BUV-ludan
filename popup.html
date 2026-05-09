@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document Checker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <button id="detach-btn" title="在独立窗口打开（不会自动关闭）" style="position:absolute; top:10px; right:10px; background:transparent; border:1px solid #cbd5e1; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:12px; color:#475569;">📌 跳出</button>
+      <h1>📄 录单助手</h1>
+      <p class="subtitle">Document Checker</p>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="main" role="tab" aria-selected="true">📄 主功能</button>
+      <button class="tab-btn" data-tab="config" role="tab" aria-selected="false">⚙️ 配置</button>
+    </nav>
+
+    <div id="tab-main" class="tab-panel">
+      <div id="api-key-warning" class="api-key-warning" style="display:none;">
+        <span class="api-key-warning-icon">⚠️</span>
+        <div class="api-key-warning-text">
+          <strong>请先配置 API Key</strong>
+          <div>切到「⚙️ 配置」标签填入 Moonshot API Key 后再使用插件功能。</div>
+        </div>
+        <button type="button" class="btn-link" id="goto-config-btn">前往配置 →</button>
+      </div>
+
+    <section class="step">
+      <div class="step-badge">1</div>
+      <h2>选择国家与注册地</h2>
+      <div class="form-group">
+        <label for="country-select">国家 / Country</label>
+        <select id="country-select">
+          <option value="">-- 请选择国家 --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="registration-select">注册地 / Registration</label>
+        <select id="registration-select" disabled>
+          <option value="">-- 请先选择国家 --</option>
+        </select>
+      </div>
+      <div class="no-config-warning" id="no-config-warning" style="display:none;">
+        ⚠️ 该组合暂无配置
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-badge">2</div>
+      <h2>上传文件夹</h2>
+      <div class="upload-area" id="upload-area">
+        <div class="upload-icon">📁</div>
+        <p>拖拽文件夹到此处</p>
+        <p class="upload-hint">支持文件夹和单个文件</p>
+      </div>
+      <div class="file-count" id="file-count" style="display:none;">
+        <span id="file-count-text"></span>
+        <button class="btn-text" id="clear-files">清除</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-badge">3</div>
+      <h2>检查结果</h2>
+      <button class="btn-primary" id="validate-btn" disabled>🔍 开始检查</button>
+
+      <!-- 清空整页表单（常驻可见，独立于检查/填充流程） -->
+      <button class="btn-primary btn-danger" id="clear-form-btn" style="width:100%; margin-top:8px;">🗑️ 清空整页表单</button>
+      <div id="clear-form-status" style="margin-top:8px; font-size:12px; color:#475569; white-space:pre-wrap;"></div>
+
+      <!-- Detection status (shown during validation) -->
+      <div id="detection-status" style="display:none; margin-top:10px; padding:10px; background:#f1f5f9; border-radius:6px; font-size:12px; color:#475569; max-height:150px; overflow-y:auto; font-family:monospace;"></div>
+
+      <div id="result-area" style="display:none;">
+        <!-- File summary -->
+        <div class="result-file-summary" id="file-summary"></div>
+
+        <!-- AI detection results -->
+        <div class="result-detection" id="detection-area">
+          <div class="detection-header">AI检测后：</div>
+          <div id="detection-list" class="detection-list"></div>
+        </div>
+
+        <!-- Missing items -->
+        <div class="result-missing-area" id="missing-area" style="display:none;">
+          <div id="missing-list" class="missing-list"></div>
+        </div>
+
+        <!-- Extracted modules (collapsible) -->
+        <div id="modules-area" style="display:none; margin-top:12px;"></div>
+
+        <!-- Pass/Fail summary -->
+        <div class="result-summary" id="result-summary"></div>
+
+        <!-- Autofill: push detected 公司信息 (text + files + dates + cascaders) to current page -->
+        <div id="autofill-area" style="display:none; margin-top:12px;">
+          <button class="btn-primary" id="autofill-btn" style="width:100%;">⚡ 一键注入信息到当前页面</button>
+          <div id="autofill-status" style="margin-top:8px; font-size:12px; color:#475569; white-space:pre-wrap;"></div>
+        </div>
+
+        <!-- Signature: generate 手写签名 + 上传 imgbb + 注入 v27 hook -->
+        <div id="signature-area" style="display:none; margin-top:12px;">
+          <div class="signature-title">✍️ 注入签名</div>
+          <div class="signature-field">
+            <label for="signature-name">签名内容（默认法人拼音，可编辑）</label>
+            <input type="text" id="signature-name" placeholder="例如：Zhang San" value="Zhang San">
+          </div>
+          <div class="signature-canvas-wrap">
+            <canvas id="signature-canvas" width="752" height="250"></canvas>
+          </div>
+          <div class="signature-info" id="signature-info">—</div>
+          <div class="signature-hint">
+            <div class="signature-hint-title">💡 注入前请确认目标页签名框状态：</div>
+            <div>• 显示二维码（还没签过）：直接点【注入签名】，签名会自动渲染</div>
+            <div>• 已有旧签名：先点页面上的【重新签名】按钮清掉，再点这里【注入签名】</div>
+          </div>
+          <div class="signature-btn-row">
+            <button class="btn-secondary" id="signature-regen-btn">🎲 再次生成</button>
+            <button class="btn-primary" id="signature-inject-btn">✍️ 注入签名</button>
+          </div>
+          <div id="signature-status" style="margin-top:8px; font-size:12px; color:#475569; white-space:pre-wrap;"></div>
+        </div>
+      </div>
+    </section>
+    </div><!-- /#tab-main -->
+
+    <div id="tab-config" class="tab-panel hidden">
+      <section class="step config-step">
+        <h2>⚙️ Moonshot API Key</h2>
+        <p class="config-desc">
+          插件使用 Moonshot（Kimi）AI 识别证件 / 营业执照 / 身份证。
+          Key 仅保存在本浏览器（chrome.storage.local），不会上传任何服务器。
+        </p>
+
+        <div class="form-group">
+          <label for="api-key-input">API Key</label>
+          <div class="api-key-input-row">
+            <input type="password" id="api-key-input" placeholder="sk-..." autocomplete="off" spellcheck="false">
+            <button type="button" class="btn-icon" id="api-key-toggle" title="显示 / 隐藏">👁</button>
+          </div>
+          <div class="form-hint" id="api-key-hint">尚未配置</div>
+        </div>
+
+        <div class="config-btn-row">
+          <button class="btn-primary" id="api-key-save-btn">💾 保存</button>
+          <button class="btn-secondary" id="api-key-test-btn" type="button">🧪 测试连通</button>
+          <button class="btn-secondary btn-danger-outline" id="api-key-clear-btn" type="button">🗑️ 清除</button>
+        </div>
+        <div id="api-key-status" class="config-status"></div>
+      </section>
+    </div><!-- /#tab-config -->
+  </div>
+
+  <script src="libs/pdf.min.js"></script>
+  <script src="libs/xlsx.full.min.js"></script>
+  <script src="libs/postal-codes.js"></script>
+  <!-- 手写签名生成（含云烟体内嵌字体） -->
+  <script src="handwriting/fonts/yunyan-data.js"></script>
+  <script src="handwriting/renderer.js"></script>
+  <script src="handwriting/styles.js"></script>
+  <script src="handwriting/index.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

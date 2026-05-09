@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Document Checker",
+  "version": "1.0.0",
+  "description": "Check uploaded folder documents against country/registration requirements",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["https://api.moonshot.cn/*", "http://*/*", "https://*/*"]
+}

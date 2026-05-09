@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>手写签名生成器 · 测试预览</title>
+  <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@300;400;700&family=Reenie+Beanie&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+  <!-- 云烟体 ttf 已 base64 内嵌，可直接 file:// 双击打开本页面，无需 HTTP 服务器 -->
+  <script src="fonts/yunyan-data.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0; padding: 24px;
+      max-width: 1320px; margin: 0 auto;
+      background: #f5f5f7; color: #1d1d1f;
+    }
+    h1 { margin: 0 0 4px; font-size: 24px; }
+    .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+    .sub a { color: #007aff; text-decoration: none; }
+    .row { display: flex; gap: 18px; align-items: flex-start; }
+    .controls {
+      flex: 0 0 360px; background: #fff; padding: 20px;
+      border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,.06);
+      position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto;
+    }
+    .preview-area { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+    .panel {
+      background: #fff; padding: 18px;
+      border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .panel-header strong { font-size: 15px; }
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block; font-size: 12px; color: #555;
+      margin-bottom: 4px; font-weight: 600;
+    }
+    .field input[type=text], .field select {
+      width: 100%; padding: 8px 10px;
+      border: 1px solid #d2d2d7; border-radius: 8px;
+      font-size: 14px; outline: none; background: #fff;
+    }
+    .field input[type=text]:focus, .field select:focus { border-color: #007aff; }
+    .field .row-inline { display: flex; align-items: center; gap: 8px; }
+    .field .row-inline input[type=range] { flex: 1; }
+    .field .val {
+      min-width: 56px; text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #007aff; font-size: 13px; font-weight: 600;
+    }
+    button {
+      width: 100%; padding: 10px 12px;
+      border: 0; border-radius: 8px;
+      font-size: 14px; cursor: pointer; font-weight: 600;
+      transition: background .15s;
+    }
+    .btn-primary { background: #007aff; color: #fff; }
+    .btn-primary:hover { background: #0066d6; }
+    .btn-secondary { background: #34c759; color: #fff; margin-top: 8px; }
+    .btn-secondary:hover { background: #2ca84e; }
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    .btn-row button { flex: 1; }
+    details {
+      margin-top: 8px; border-top: 1px solid #f0f0f0; padding-top: 8px;
+    }
+    details summary {
+      cursor: pointer; font-weight: 600; color: #007aff;
+      padding: 6px 0; user-select: none; font-size: 13px;
+    }
+    .canvas-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 24px 0;
+      background: repeating-conic-gradient(#f8f8f8 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+      border-radius: 8px;
+    }
+    canvas {
+      border: 1px dashed #d2d2d7;
+      max-width: 100%; height: auto;
+      background: transparent;
+    }
+    .info {
+      color: #888; font-size: 11px; margin-top: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .badge {
+      display: inline-block; padding: 3px 8px;
+      background: #007aff; color: #fff;
+      border-radius: 6px; font-size: 11px; font-weight: 600;
+    }
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .gallery .item {
+      border: 1px solid #eee; border-radius: 10px;
+      padding: 12px; text-align: center;
+      transition: all .15s;
+      cursor: pointer; background: #fafafa;
+    }
+    .gallery .item:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,.08);
+      border-color: #007aff;
+      background: #fff;
+    }
+    .gallery .item.active {
+      border-color: #007aff; background: #f0f7ff;
+    }
+    .gallery .item img {
+      width: 100%; height: 80px; object-fit: contain;
+      background: #fff; border-radius: 4px;
+    }
+    .gallery .item .lab {
+      font-size: 13px; color: #1d1d1f;
+      font-weight: 600; margin-top: 6px;
+    }
+    .gallery .item .desc { font-size: 11px; color: #888; margin-top: 2px; }
+    .help { font-size: 12px; color: #888; margin-top: 4px; }
+    .loading { color: #888; font-size: 13px; padding: 12px; }
+
+    /* 滚动条 */
+    .controls::-webkit-scrollbar { width: 8px; }
+    .controls::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
+
+    textarea {
+      width: 100%; box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid #d2d2d7; border-radius: 8px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 12px; line-height: 1.5;
+      resize: vertical; outline: none;
+      background: #fafafa;
+    }
+    textarea:focus { border-color: #007aff; background: #fff; }
+    .url-result {
+      display: flex; gap: 8px; align-items: center;
+      padding: 8px 10px; background: #f0f7ff;
+      border: 1px solid #cde0ff; border-radius: 8px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 12px; word-break: break-all;
+    }
+    .url-result a { color: #007aff; text-decoration: none; flex: 1; }
+    .url-result.ok { background: #efffef; border-color: #c0e8c0; }
+    .url-result.err { background: #ffefef; border-color: #e8c0c0; color: #c00; }
+    .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; margin-right: 6px;
+      background: #007aff; color: #fff;
+      border-radius: 50%; font-size: 12px; font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+<h1>手写签名生成器 · 独立测试预览</h1>
+<p class="sub">
+  算法参考 <a href="https://github.com/Gsllchb/Handright" target="_blank">handright</a> 的 7-sigma 扰动模型。
+  纯 Canvas 实现，无后端。Google Fonts 加载字体。
+</p>
+
+<div class="row">
+  <!-- 左侧控制面板 -->
+  <div class="controls">
+    <div class="field">
+      <label>签名内容</label>
+      <input type="text" id="name" value="Zhang San">
+      <div class="help">英文/拼音效果最佳。中文需用支持中文的字体。</div>
+    </div>
+
+    <div class="field">
+      <label>风格预设</label>
+      <select id="style"></select>
+      <div class="help" id="style-desc"></div>
+    </div>
+
+    <div class="field">
+      <label>字号 <span class="val" id="fontSize-val">78</span></label>
+      <input type="range" id="fontSize" min="40" max="160" value="78">
+    </div>
+
+    <details open>
+      <summary>扰动参数（sigma · 越大越随性）</summary>
+      <div class="field">
+        <label>X 偏移 σ <span class="val" id="perturbXSigma-val">1.5</span></label>
+        <input type="range" id="perturbXSigma" min="0" max="6" step="0.1" value="1.5">
+      </div>
+      <div class="field">
+        <label>Y 偏移 σ <span class="val" id="perturbYSigma-val">1.5</span></label>
+        <input type="range" id="perturbYSigma" min="0" max="6" step="0.1" value="1.5">
+      </div>
+      <div class="field">
+        <label>旋转 σ <span class="val" id="perturbThetaSigma-val">0.04</span></label>
+        <input type="range" id="perturbThetaSigma" min="0" max="0.2" step="0.005" value="0.04">
+      </div>
+      <div class="field">
+        <label>字号 σ <span class="val" id="fontSizeSigma-val">4</span></label>
+        <input type="range" id="fontSizeSigma" min="0" max="15" step="0.5" value="4">
+      </div>
+      <div class="field">
+        <label>字距 σ <span class="val" id="wordSpacingSigma-val">2</span></label>
+        <input type="range" id="wordSpacingSigma" min="0" max="8" step="0.5" value="2">
+      </div>
+      <div class="field">
+        <label>墨色 σ (RGB 偏移 0～80) <span class="val" id="inkDepthSigma-val">30</span></label>
+        <input type="range" id="inkDepthSigma" min="0" max="80" step="1" value="30">
+      </div>
+      <div class="field">
+        <label>整体倾斜 <span class="val" id="rotate-val">-0.04</span></label>
+        <input type="range" id="rotate" min="-0.2" max="0.2" step="0.01" value="-0.04">
+      </div>
+    </details>
+
+    <details>
+      <summary>涂改线（strikethrough）</summary>
+      <div class="field">
+        <label>出现概率 <span class="val" id="strikethroughProbability-val">0</span></label>
+        <input type="range" id="strikethroughProbability" min="0" max="0.05" step="0.001" value="0">
+        <div class="help">handright 默认 0.005（每 200 个字有一个被划）</div>
+      </div>
+      <div class="field">
+        <label>长度 σ <span class="val" id="strikethroughLengthSigma-val">2</span></label>
+        <input type="range" id="strikethroughLengthSigma" min="0" max="10" step="0.1" value="2">
+      </div>
+      <div class="field">
+        <label>角度 σ <span class="val" id="strikethroughAngleSigma-val">2</span></label>
+        <input type="range" id="strikethroughAngleSigma" min="0" max="15" step="0.5" value="2">
+      </div>
+      <div class="field">
+        <label>宽度 σ <span class="val" id="strikethroughWidthSigma-val">2</span></label>
+        <input type="range" id="strikethroughWidthSigma" min="0" max="10" step="0.5" value="2">
+      </div>
+      <div class="field">
+        <label>宽度 <span class="val" id="strikethroughWidth-val">8</span></label>
+        <input type="range" id="strikethroughWidth" min="1" max="20" step="0.5" value="8">
+      </div>
+    </details>
+
+    <details>
+      <summary>底部装饰</summary>
+      <div class="field">
+        <label>底部装饰</label>
+        <select id="underlineStyle">
+          <option value="curve">曲线波浪</option>
+          <option value="line">直线</option>
+          <option value="tail">尾笔</option>
+          <option value="scribble">涂鸦短勾</option>
+          <option value="">无</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>墨色</label>
+        <input type="text" id="color" value="#0a1a3e">
+      </div>
+    </details>
+
+    <details>
+      <summary>画布</summary>
+      <div class="field">
+        <label>宽 × 高（像素，输出 PNG 尺寸）</label>
+        <div class="row-inline">
+          <input type="text" id="width" value="752" style="width:80px"> ×
+          <input type="text" id="height" value="250" style="width:80px">
+        </div>
+        <div class="help">默认 752×250（20:8.5 同比例）、透明背景，适配签名框</div>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="transparent" checked> 透明背景</label>
+      </div>
+    </details>
+
+    <button class="btn-primary" id="reroll">🎲 重新生成（同参数不同随机）</button>
+    <button class="btn-secondary" id="gallery-btn">📊 全部风格对比</button>
+  </div>
+
+  <!-- 右侧预览区 -->
+  <div class="preview-area">
+    <div class="panel">
+      <div class="panel-header">
+        <strong>当前预览</strong>
+        <span id="current-style" class="badge">business</span>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="canvas" width="752" height="250"></canvas>
+        <div class="info" id="info">—</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="download-btn" style="background:#5856d6">⬇ 下载 PNG</button>
+        <button class="btn-primary" id="copy-dataurl-btn" style="background:#ff9500">📋 复制 dataURL</button>
+        <button class="btn-primary" id="copy-blob-btn" style="background:#af52de">🖼 复制图到剪贴板</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <strong>多风格对比</strong>
+        <span class="help">点 “全部风格对比”，每张图同时切换风格</span>
+      </div>
+      <div id="gallery" class="gallery"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <strong>同风格 4 张随机</strong>
+        <span class="help">同参数，看随机扰动效果范围</span>
+      </div>
+      <div id="variants" class="gallery"></div>
+      <button class="btn-primary" id="variants-btn" style="margin-top:8px">🔄 生成 4 张随机变体</button>
+    </div>
+
+    <!-- ① 图床上传 -->
+    <div class="panel">
+      <div class="panel-header">
+        <strong><span class="step-num">1</span>上传到图床获取 HTTPS URL</strong>
+        <span class="help">用于 v27 注入</span>
+      </div>
+      <div class="field">
+        <label>图床（默认 imgbb · 带 API Key · 国内可用）</label>
+        <select id="host">
+          <option value="imgbb">imgbb · 推荐（支持 CORS·默认 7 天后自动删）</option>
+          <option value="smms">sm.ms · 匿名上传（可能 CORS 被拦）</option>
+          <option value="litterbox-1">litterbox · 1 小时（调试用·海外慢）</option>
+          <option value="litterbox-12">litterbox · 12 小时</option>
+          <option value="litterbox-24">litterbox · 24 小时</option>
+          <option value="litterbox-72">litterbox · 72 小时</option>
+          <option value="catbox">catbox · 永久（请慎用·海外慢）</option>
+          <option value="0x0">0x0.st · 临时（海外慢）</option>
+        </select>
+        <div class="help">如遇 CORS 失败，可手动用其它图床后把 URL 粘贴到下面输入框</div>
+      </div>
+      <button class="btn-primary" id="upload-btn" style="background:#34c759">⬆ 上传当前签名</button>
+      <div class="field" style="margin-top:12px">
+        <label>图床返回 URL（自动填，可手动修改）</label>
+        <input type="text" id="hosted-url" placeholder="https://i.ibb.co/xxxxxx.png">
+      </div>
+      <div id="upload-result" class="url-result" style="display:none"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="copy-url-btn" style="background:#ff9500">📋 复制 URL</button>
+        <button class="btn-primary" id="open-url-btn" style="background:#5856d6">🔗 新标签打开</button>
+      </div>
+    </div>
+
+    <!-- ② v27 注入脚本生成 -->
+    <div class="panel">
+      <div class="panel-header">
+        <strong><span class="step-num">2</span>v27 注入脚本</strong>
+        <span class="help">复制到 user.axisacct.com 控制台运行</span>
+      </div>
+      <div class="field">
+        <label>脚本（URL 改动会自动同步）</label>
+        <textarea id="v27-script" rows="12" spellcheck="false"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="copy-script-btn">📋 复制脚本</button>
+        <button class="btn-primary" id="download-script-btn" style="background:#5856d6">⬇ 下载 .js</button>
+      </div>
+      <div class="help" style="margin-top:8px">
+        操作步骤：①生成签名 →②上传图床 →③复制脚本 →④到目标页面 F12 控制台粘贴 →⑤点页面[重新签名]/[保存] →⑥看控制台 ✓/✗ 判定
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="renderer.js"></script>
+<script src="styles.js"></script>
+<script src="index.js"></script>
+<script>
+  const HW = window.Handwriting;
+  const $ = id => document.getElementById(id);
+  let lastResult = null;
+
+  // 1) 初始化风格下拉
+  Object.entries(HW.STYLES).forEach(([key, s]) => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = `${s.name} (${key})`;
+    $('style').appendChild(opt);
+  });
+
+  // 2) 范围滑块同步显示 + 触发渲染
+  document.querySelectorAll('input[type=range]').forEach(input => {
+    const valEl = $(input.id + '-val');
+    input.addEventListener('input', () => {
+      if (valEl) valEl.textContent = input.value;
+      render();
+    });
+  });
+
+  // 3) 其它输入触发
+  let nameTimer;
+  $('name').addEventListener('input', () => {
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(render, 200);
+  });
+  ['underlineStyle', 'color', 'width', 'height', 'transparent'].forEach(id => {
+    $(id).addEventListener('change', render);
+  });
+
+  $('style').addEventListener('change', () => {
+    applyStylePreset();
+    render();
+  });
+  $('reroll').addEventListener('click', render);
+  $('gallery-btn').addEventListener('click', renderGallery);
+  $('variants-btn').addEventListener('click', renderVariants);
+
+  // 4) 下载 / 复制
+  $('download-btn').addEventListener('click', () => {
+    if (!lastResult) return;
+    const a = document.createElement('a');
+    a.href = lastResult.dataURL;
+    a.download = `signature-${$('name').value.replace(/\s+/g,'_')}-${Date.now()}.png`;
+    a.click();
+  });
+
+  $('copy-dataurl-btn').addEventListener('click', async () => {
+    if (!lastResult) return;
+    try {
+      await navigator.clipboard.writeText(lastResult.dataURL);
+      flashInfo(`✓ dataURL 已复制（${(lastResult.dataURL.length/1024).toFixed(1)}KB）`);
+    } catch (e) { flashInfo('✗ 复制失败：' + e.message); }
+  });
+
+  $('copy-blob-btn').addEventListener('click', async () => {
+    if (!lastResult) return;
+    try {
+      const item = new ClipboardItem({ 'image/png': lastResult.blob });
+      await navigator.clipboard.write([item]);
+      flashInfo('✓ 图片已复制到剪贴板（可粘贴到 IM/邮件）');
+    } catch (e) { flashInfo('✗ 复制失败：' + e.message); }
+  });
+
+  function flashInfo(msg) {
+    const el = $('info');
+    const old = el.textContent;
+    el.textContent = msg;
+    el.style.color = '#34c759';
+    setTimeout(() => {
+      el.textContent = old;
+      el.style.color = '';
+    }, 1800);
+  }
+
+  // 5) 把风格预设的值写入控件
+  function applyStylePreset() {
+    const styleKey = $('style').value;
+    const preset = HW.STYLES[styleKey];
+    if (!preset) return;
+    $('current-style').textContent = styleKey;
+    $('style-desc').textContent = preset.desc || '';
+    const ids = ['fontSize','perturbXSigma','perturbYSigma','perturbThetaSigma','fontSizeSigma','wordSpacingSigma','inkDepthSigma','rotate','strikethroughProbability','strikethroughLengthSigma','strikethroughAngleSigma','strikethroughWidthSigma','strikethroughWidth'];
+    ids.forEach(id => {
+      if (preset[id] !== undefined) {
+        $(id).value = preset[id];
+        const valEl = $(id + '-val');
+        if (valEl) valEl.textContent = preset[id];
+      }
+    });
+    if (preset.underline === false) {
+      $('underlineStyle').value = '';
+    } else if (preset.underlineStyle !== undefined) {
+      $('underlineStyle').value = preset.underlineStyle || 'curve';
+    }
+    if (preset.color) $('color').value = preset.color;
+  }
+
+  function getOpts() {
+    const us = $('underlineStyle').value;
+    return {
+      style: $('style').value,
+      width: parseInt($('width').value) || 752,
+      height: parseInt($('height').value) || 250,
+      // 锁定 dpr=1，保证输出 PNG 像素严格等于 width×height
+      dpr: 1,
+      fontSize: +$('fontSize').value,
+      perturbXSigma: +$('perturbXSigma').value,
+      perturbYSigma: +$('perturbYSigma').value,
+      perturbThetaSigma: +$('perturbThetaSigma').value,
+      fontSizeSigma: +$('fontSizeSigma').value,
+      wordSpacingSigma: +$('wordSpacingSigma').value,
+      inkDepthSigma: +$('inkDepthSigma').value,
+      rotate: +$('rotate').value,
+      strikethroughProbability: +$('strikethroughProbability').value,
+      strikethroughLengthSigma:  +$('strikethroughLengthSigma').value,
+      strikethroughAngleSigma:   +$('strikethroughAngleSigma').value,
+      strikethroughWidthSigma:   +$('strikethroughWidthSigma').value,
+      strikethroughWidth:        +$('strikethroughWidth').value,
+      underlineStyle: us,
+      underline: !!us,
+      color: $('color').value || undefined,
+      transparent: $('transparent').checked
+    };
+  }
+
+  // 6) 主渲染
+  let renderToken = 0;
+  async function render() {
+    const tok = ++renderToken;
+    const name = $('name').value || 'Zhang San';
+    try {
+      const opts = getOpts();
+      const r = await HW.generate(name, opts);
+      if (tok !== renderToken) return;
+      lastResult = r;
+      // 把内部 canvas 画到展示 canvas
+      const canvas = $('canvas');
+      canvas.width = r.canvas.width;
+      canvas.height = r.canvas.height;
+      canvas.style.width = (r.canvas.width / (window.devicePixelRatio || 1)) + 'px';
+      canvas.style.height = (r.canvas.height / (window.devicePixelRatio || 1)) + 'px';
+      canvas.getContext('2d').drawImage(r.canvas, 0, 0);
+      $('info').textContent = `${name} · ${r.canvas.width}×${r.canvas.height}px · PNG ${(r.blob.size/1024).toFixed(1)}KB · dataURL ${(r.dataURL.length/1024).toFixed(1)}KB`;
+      $('info').style.color = '';
+    } catch (e) {
+      $('info').textContent = '渲染失败：' + e.message;
+      $('info').style.color = '#ff3b30';
+      console.error(e);
+    }
+  }
+
+  // 7) 全部风格对比
+  async function renderGallery() {
+    const gallery = $('gallery');
+    gallery.innerHTML = '<div class="loading">生成中...</div>';
+    const name = $('name').value || 'Zhang San';
+    const items = [];
+    for (const [key, preset] of Object.entries(HW.STYLES)) {
+      const r = await HW.generate(name, { style: key });
+      items.push({ key, preset, dataURL: r.dataURL });
+    }
+    gallery.innerHTML = '';
+    const currentStyle = $('style').value;
+    items.forEach(({ key, preset, dataURL }) => {
+      const item = document.createElement('div');
+      item.className = 'item' + (key === currentStyle ? ' active' : '');
+      item.innerHTML = `<img src="${dataURL}"><div class="lab">${preset.name}</div><div class="desc">${preset.desc || ''}</div>`;
+      item.addEventListener('click', () => {
+        $('style').value = key;
+        applyStylePreset();
+        render();
+        document.querySelectorAll('#gallery .item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+      });
+      gallery.appendChild(item);
+    });
+  }
+
+  // 8) 同风格 4 张随机
+  async function renderVariants() {
+    const wrap = $('variants');
+    wrap.innerHTML = '<div class="loading">生成中...</div>';
+    const name = $('name').value || 'Zhang San';
+    const opts = getOpts();
+    const results = await HW.generateMany(name, opts, 4);
+    wrap.innerHTML = '';
+    results.forEach((r, i) => {
+      const item = document.createElement('div');
+      item.className = 'item';
+      item.innerHTML = `<img src="${r.dataURL}"><div class="lab">变体 ${i+1}</div>`;
+      item.addEventListener('click', () => {
+        // 下载
+        const a = document.createElement('a');
+        a.href = r.dataURL;
+        a.download = `signature-variant-${i+1}-${Date.now()}.png`;
+        a.click();
+      });
+      wrap.appendChild(item);
+    });
+  }
+
+  // 9) 初始化：等字体加载好再首次渲染
+  (async function init() {
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (e) {}
+    }
+    if (HW.preloadAll) await HW.preloadAll();
+    applyStylePreset();
+    await render();
+    refreshScript();
+  })();
+
+  // ========== 图床上传 ==========
+  // imgbb API key：个人免费号、专门给这个调试页面用。如要换人/换号，改这一行即可。
+  // 注意：这是免费个人 key，泄漏后别人可以在你名下传图，但已默认 7 天过期、风险可控。不要提交进 git 公开仓库。
+  const IMGBB_API_KEY = 'e4160a3203a90187c6e63117bffd66f8';
+  const IMGBB_EXPIRATION_SECONDS = 7 * 24 * 3600; // 7 天。可调 60 ~ 15552000。后端插六后就不需要了，设短一点也不肯丢
+
+  async function uploadToHost(blob, host) {
+    const fd = new FormData();
+    const filename = `signature-${Date.now()}.png`;
+
+    // imgbb 上传：需 API key，CORS 友好，全球 CDN。返回结构：
+    //   { success:true, status:200, data:{ url:'https://i.ibb.co/xxx.png', image:{url:...}, ... } }
+    //   { success:false, status:400, error:{ message:'...' } }
+    if (host === 'imgbb') {
+      fd.append('image', blob, filename);
+      const url = `https://api.imgbb.com/1/upload?key=${encodeURIComponent(IMGBB_API_KEY)}&expiration=${IMGBB_EXPIRATION_SECONDS}`;
+      const res = await fetch(url, { method: 'POST', body: fd });
+      let json;
+      try { json = await res.json(); }
+      catch (_) { throw new Error(`imgbb HTTP ${res.status}（响应不是 JSON）`); }
+      if (json.success && json.data) {
+        // 优先用 data.image.url（i.ibb.co 直链），后端侎赖 fetch 这种直链最稳
+        return (json.data.image && json.data.image.url) || json.data.url || json.data.display_url;
+      }
+      const errMsg = (json.error && (json.error.message || json.error.context)) || json.status_txt || JSON.stringify(json).slice(0, 200);
+      throw new Error(`imgbb 失败 (HTTP ${res.status}): ${errMsg}`);
+    }
+
+    // sm.ms 匿名上传：国内访问友好。允许匿名（不需 token），返回 JSON。
+    // 注：部分网络环境下 sm.ms 会返回 CORS 拒绝，现作为备胎保留。
+    // 多种响应形式都要能拿到 url：
+    //   新上传：{ success:true, code:'success', data:{ url:'...' } }
+    //   重复图：{ success:false, code:'image_repeated', images:'...' }   ← 上面服务器貌似返回 200 但 success=false，需走 images 字段
+    //   限频：  { success:false, code:'flood' / 'overload', message:'...' }   ← 丢错出去让用户选备胎
+    if (host === 'smms') {
+      fd.append('smfile', blob, filename);
+      const res = await fetch('https://sm.ms/api/v2/upload', { method: 'POST', body: fd });
+      let json;
+      try { json = await res.json(); }
+      catch (_) { throw new Error(`sm.ms HTTP ${res.status}（响应不是 JSON）`); }
+      // 新上传成功
+      if (json.success && json.data && json.data.url) return json.data.url;
+      // 重复图：url 在顶层 images 字段
+      if (json.code === 'image_repeated' && json.images) return json.images;
+      // 其它远期响应兼容
+      if (json.data && json.data.images_url) return json.data.images_url;
+      throw new Error(`sm.ms 失败: ${json.message || json.code || JSON.stringify(json).slice(0, 160)}`);
+    }
+
+    if (host === 'catbox') {
+      fd.append('reqtype', 'fileupload');
+      fd.append('fileToUpload', blob, filename);
+      const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`catbox HTTP ${res.status}`);
+      const txt = (await res.text()).trim();
+      if (!/^https?:\/\//.test(txt)) throw new Error('catbox 返回异常: ' + txt);
+      return txt;
+    }
+
+    if (host.startsWith('litterbox-')) {
+      const time = host.split('-')[1] + 'h';
+      fd.append('reqtype', 'fileupload');
+      fd.append('time', time);
+      fd.append('fileToUpload', blob, filename);
+      const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`litterbox HTTP ${res.status}`);
+      const txt = (await res.text()).trim();
+      if (!/^https?:\/\//.test(txt)) throw new Error('litterbox 返回异常: ' + txt);
+      return txt;
+    }
+
+    if (host === '0x0') {
+      fd.append('file', blob, filename);
+      const res = await fetch('https://0x0.st', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`0x0 HTTP ${res.status}`);
+      const txt = (await res.text()).trim();
+      if (!/^https?:\/\//.test(txt)) throw new Error('0x0 返回异常: ' + txt);
+      return txt;
+    }
+
+    throw new Error('未知图床: ' + host);
+  }
+
+  function showUploadResult(html, kind) {
+    const el = $('upload-result');
+    el.style.display = '';
+    el.className = 'url-result' + (kind ? ' ' + kind : '');
+    el.innerHTML = html;
+  }
+
+  $('upload-btn').addEventListener('click', async () => {
+    if (!lastResult) { showUploadResult('请先生成签名图', 'err'); return; }
+    const btn = $('upload-btn');
+    const host = $('host').value;
+    btn.disabled = true; btn.textContent = '⏳ 上传中...';
+    showUploadResult('正在上传到 ' + host + ' …', '');
+    try {
+      const url = await uploadToHost(lastResult.blob, host);
+      $('hosted-url').value = url;
+      showUploadResult(`✓ 上传成功 <a href="${url}" target="_blank">${url}</a>`, 'ok');
+      refreshScript();
+    } catch (e) {
+      console.error('[upload]', e);
+      const msg = e.message || String(e);
+      const isCors = /cors|failed to fetch|network/i.test(msg);
+      showUploadResult(
+        `✗ 上传失败：${msg}` +
+        (isCors ? '<br><span style="color:#666">CORS 限制：换个图床试试，或用浏览器扩展 / Postman 上传后把 URL 粘到下方输入框</span>' : ''),
+        'err'
+      );
+    } finally {
+      btn.disabled = false; btn.textContent = '⬆ 上传当前签名';
+    }
+  });
+
+  $('hosted-url').addEventListener('input', refreshScript);
+
+  $('copy-url-btn').addEventListener('click', async () => {
+    const u = $('hosted-url').value.trim();
+    if (!u) return showUploadResult('URL 为空', 'err');
+    try {
+      await navigator.clipboard.writeText(u);
+      showUploadResult('✓ URL 已复制：' + u, 'ok');
+    } catch (e) { showUploadResult('复制失败：' + e.message, 'err'); }
+  });
+
+  $('open-url-btn').addEventListener('click', () => {
+    const u = $('hosted-url').value.trim();
+    if (!u) return showUploadResult('URL 为空', 'err');
+    window.open(u, '_blank');
+  });
+
+  // ========== v27 注入脚本生成 ==========
+  function buildV27Script(url) {
+    const safeUrl = url || 'https://via.placeholder.com/600x200.png?text=v27+TEST';
+    // 用 JSON.stringify 安全转义
+    const urlLit = JSON.stringify(safeUrl);
+    return `(function () {
+  // ===== 配置 =====
+  const TEST_URL = ${urlLit};
+  window.__FAKE_URL = TEST_URL;
+
+  if (XMLHttpRequest.prototype.send.__v27) {
+    console.warn('[v27] 已装，请刷新页面再运行');
+    return;
+  }
+
+  const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
+
+  let hasInjected = false; // ← 一次性开关
+
+  XMLHttpRequest.prototype.open = function (m, u) {
+    this.__url = u; this.__method = m;
+    return origOpen.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function (body) {
+    const xhr = this;
+
+    // A) 拦 signature → 注入 TEST_URL（仅一次）
+    if (!hasInjected && xhr.__url && xhr.__url.indexOf('/vat/taxGrantInfo/signature/') >= 0) {
+      hasInjected = true; // ← 标记已注入，后续 signature 请求走原始流程
+      const url = window.__FAKE_URL;
+      const fakeStr = JSON.stringify({ code: 200, success: true, msg: "ok", data: url });
+      console.log('[v27] 拦 signature → 注入(仅此一次):', url);
+      setTimeout(() => {
+        try {
+          Object.defineProperty(xhr, 'readyState',   { value: 4,       configurable: true });
+          Object.defineProperty(xhr, 'status',       { value: 200,     configurable: true });
+          Object.defineProperty(xhr, 'statusText',   { value: 'OK',    configurable: true });
+          Object.defineProperty(xhr, 'responseText', { value: fakeStr, configurable: true });
+          Object.defineProperty(xhr, 'response',     { value: fakeStr, configurable: true });
+          xhr.getAllResponseHeaders = () => 'content-type: application/json\\r\\n';
+          xhr.getResponseHeader = (n) => /content-type/i.test(n) ? 'application/json' : null;
+          if (xhr.onreadystatechange) xhr.onreadystatechange();
+          if (xhr.onload) xhr.onload();
+          xhr.dispatchEvent(new Event('load'));
+          xhr.dispatchEvent(new Event('loadend'));
+        } catch (e) { console.error('[v27] inject err', e); }
+      }, 10);
+      return;
+    }
+
+    // B) 偷看 save 请求 body + 自动判定响应
+    if (xhr.__url && xhr.__url.indexOf('/merchantServiceData/save') >= 0) {
+      console.log('%c[v27] save 请求发出', 'color:#08f;font-weight:bold');
+      try {
+        const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+        const allStr = JSON.stringify(parsed);
+        console.log('  body 含 TEST_URL?', allStr.indexOf(TEST_URL) >= 0 ? '✓ 是' : '✗ 否');
+        (function scan(o, p) {
+          if (!o || typeof o !== 'object') return;
+          for (const k of Object.keys(o)) {
+            const v = o[k];
+            if (k === 'objValue' && typeof v === 'string' && /https?:|placeholder|evatmaster|\\.png/i.test(v)) {
+              console.log('  ' + p + '.objValue =', v.length > 150 ? v.slice(0, 150) + '...' : v);
+            }
+            if (v && typeof v === 'object') scan(v, p + '.' + k);
+          }
+        })(parsed, 'body');
+      } catch (e) { console.warn('[v27] body 解析失败', e); }
+
+      xhr.addEventListener('load', function () {
+        try {
+          const t = xhr.responseText;
+          console.log('%c[v27] save 响应:', 'color:#f80;font-weight:bold;font-size:14px');
+          console.log('  status:', xhr.status);
+          console.log('  body:', t);
+          let j = null;
+          try { j = JSON.parse(t); } catch (e) {}
+          if (j) {
+            const ok = (j.code === 0 || j.code === 200) && j.msg !== 'fail' && !/fail|error|invalid|illegal|非法|失败|格式/i.test(j.msg || j.message || '');
+            if (ok) {
+              console.log('%c  ✓✓✓ SUCCESS！后端 [无] 域名白名单，任意公网图床即可。', 'color:#0a0;font-weight:bold;font-size:14px;background:#efe;padding:4px');
+              console.log('  → 扩展只需：生成图 → 上传图床 → 注入 URL，无需研究 m 端上传');
+            } else {
+              console.log('%c  ✗✗✗ 失败：' + (j.msg || j.message || JSON.stringify(j)), 'color:#f00;font-weight:bold;font-size:14px;background:#fee;padding:4px');
+              console.log('  → 后端可能有域名白名单或图片下载校验，需要走 m 端上传路径（v25 路径）');
+            }
+          }
+        } catch (e) { console.error(e); }
+      });
+    }
+
+    return origSend.apply(this, arguments);
+  };
+  origSend.__v27 = true;
+
+  console.log('%c=== v27 验证脚本就绪（单次注入版） ===', 'color:#08f;font-weight:bold;font-size:14px');
+  console.log('TEST_URL:', TEST_URL);
+  console.log('');
+  console.log('操作步骤：');
+  console.log('  1. 点页面 [重新签名] 按钮（如果当前已显示签名图）');
+  console.log('  2. 等 5~10 秒，看签名框是否渲染图片');
+  console.log('  3. 点页面 [保存] / [下一步] / [提交]');
+  console.log('  4. 看 console 自动判定的 ✓/✗ 结果');
+  console.log('');
+  console.log('💡 如需重新注入：window.__v27Reset()');
+
+  // 提供手动重置入口（可选）
+  window.__v27Reset = () => { hasInjected = false; console.log('[v27] 已重置，下次 signature 请求会再注入一次'); };
+})();`;
+  }
+
+  function refreshScript() {
+    const u = $('hosted-url').value.trim();
+    $('v27-script').value = buildV27Script(u);
+  }
+
+  $('copy-script-btn').addEventListener('click', async () => {
+    const ta = $('v27-script');
+    try {
+      await navigator.clipboard.writeText(ta.value);
+      const btn = $('copy-script-btn');
+      const old = btn.textContent;
+      btn.textContent = '✓ 已复制 → 去目标页面控制台粘贴';
+      btn.style.background = '#34c759';
+      setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 2200);
+    } catch (e) {
+      ta.select(); document.execCommand('copy');
+      alert('已用兼容方式复制');
+    }
+  });
+
+  $('download-script-btn').addEventListener('click', () => {
+    const blob = new Blob([$('v27-script').value], { type: 'text/javascript' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `inject-v27-${Date.now()}.js`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+</script>
+
+</body>
+</html>

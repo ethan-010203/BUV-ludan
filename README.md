@@ -1,0 +1,135 @@
+# 📄 录单助手 · Document Checker
+
+> Chrome 扩展（Manifest V3）。给跨境电商「录单」场景的开发助手——按 **国家 × 注册地** 组合检查上传材料齐全度，AI 识别营业执照 / 身份证 / 完税证明等关键证件，并把识别结果一键回填到目标平台的卖家中心；同时支持手写签名生成 + 注入。
+
+---
+
+## ✨ 核心功能
+
+| # | 功能 | 说明 |
+|---|---|---|
+| 1 | **国家 × 注册地组合** | 不同组合（如 `Poland\|China`）有不同的必填字段、必备文件、识别项 |
+| 2 | **拖拽文件夹上传** | 支持文件夹和单个文件，前端纯 JS 处理 |
+| 3 | **AI 文档识别** | 调 Moonshot（Kimi）vision 模型识别营业执照 / 身份证正反面 / 完税证明等，输出结构化 JSON |
+| 4 | **PDF 多页识别** | 通过 `pdf.js` 拆页转图后逐页送 AI |
+| 5 | **xlsx 模板读取** | 读"基础信息表"单元格回填字段 |
+| 6 | **缺失文件兜底** | 必填项缺失时可生成临时空白占位文件（jpg/pdf/png） |
+| 7 | **一键注入卖家中心** | 把识别 + 表格的字段批量填到当前页面（DOM + cascader + 上传框） |
+| 8 | **手写签名注入** | 本地用云烟体生成手写签名 → 上传 imgbb → MAIN world hook 拦截后端 signature 接口注入 URL |
+| 9 | **全表清空** | 一键清掉当前页所有字段 / 上传 / 复选框，便于重测 |
+
+---
+
+## 🚀 安装与加载（开发者模式）
+
+1. `git clone https://github.com/ethan-010203/BUV-ludan.git`
+2. 打开 Chrome → `chrome://extensions`
+3. 右上角打开「开发者模式」
+4. 点「加载已解压的扩展程序」 → 选择本仓库根目录（即 `manifest.json` 所在目录）
+5. 工具栏出现 📄 图标即装好
+
+---
+
+## ⚙️ 首次配置
+
+插件依赖 Moonshot（Kimi）AI 做证件识别，**首次使用前必须配置 API Key**。
+
+1. 点击工具栏 📄 图标打开 popup
+2. 首次打开会自动跳到「⚙️ 配置」tab（之后随时可手动切换）
+3. 前往 [platform.moonshot.cn/console/api-keys](https://platform.moonshot.cn/console/api-keys) 创建 API Key
+4. 粘贴到输入框 → 点 `🧪 测试连通` 验证 → 点 `💾 保存`
+5. 切回「📄 主功能」tab 即可开始使用
+
+> 🔒 Key 仅保存在本浏览器的 `chrome.storage.local`，不会上传任何服务器。
+> ❌ 未配置时主功能 tab 会显示提示 banner，所有操作按钮被禁用。
+
+---
+
+## 🔄 标准使用流程
+
+```
+1. 选国家 + 注册地  →  2. 拖文件夹上传  →  3. 点【🔍 开始检查】
+                                            │
+                                            ▼
+                                    ┌─────────────────┐
+                                    │ AI 识别 + 字段   │
+                                    │ 提取 + 模块构建  │
+                                    └────────┬────────┘
+                                             │
+                ┌────────────────────────────┼────────────────────────────┐
+                ▼                            ▼                            ▼
+        ┌──────────────┐           ┌──────────────┐           ┌──────────────┐
+        │ 缺失项 + 占位 │           │  ⚡ 一键注入  │           │ ✍️ 注入签名  │
+        └──────────────┘           └──────────────┘           └──────────────┘
+```
+
+---
+
+## 📂 项目结构
+
+```
+PL-tool2/
+├── manifest.json            # MV3 清单（permissions: storage / activeTab / scripting / tabs）
+├── popup.html               # 主 UI（Tabs：主功能 / 配置）
+├── popup.css                # 样式
+├── popup.js                 # 主逻辑（约 3600 行，事件入口 / AI / 注入 / 签名）
+├── requirements.json        # 国家 × 注册地组合的字段配置
+├── ARCHITECTURE.md          # 架构文档（必读：怎么加新组合 / 积木 / 模块）
+├── README.md                # 本文档
+├── handwriting/             # 手写签名生成模块
+│   ├── fonts/yunyan-data.js # ★云烟体字体（base64 内嵌，~8 MB）
+│   ├── renderer.js          # 7-sigma 扰动渲染核心
+│   ├── styles.js            # 签名风格预设
+│   ├── index.js             # 入口（window.Handwriting）
+│   └── test.html            # 独立预览页（不被插件加载）
+├── libs/
+│   ├── pdf.min.js           # PDF.js（PDF 拆页）
+│   ├── pdf.worker.min.js    # PDF.js worker
+│   ├── xlsx.full.min.js     # SheetJS（读 xlsx）
+│   └── postal-codes.js      # 中国邮编 / 区划数据
+└── icons/                   # 16 / 48 / 128 px 图标
+```
+
+详细的"组合配置结构 / 积木 / 加新组合 SOP"见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)。
+
+---
+
+## 🛠 技术栈
+
+- **运行环境**：Chrome MV3 Extension（无 background / 无 content script，全部在 popup + `chrome.scripting.executeScript`）
+- **AI**：Moonshot vision (`kimi-k2.6` / `moonshot-v1-32k-vision-preview`)
+- **PDF 解析**：[PDF.js](https://mozilla.github.io/pdf.js/)
+- **Excel 解析**：[SheetJS](https://sheetjs.com/)
+- **图床**：[imgbb](https://imgbb.com/)（仅签名图片用）
+- **手写签名**：参考 [Handright](https://github.com/Gsllchb/Handright) 的 7-sigma 扰动算法 + 云烟体内嵌字体
+- **持久化**：`chrome.storage.local`（API Key、上次选择的国家/注册地）
+
+---
+
+## 🔐 安全 & 隐私说明
+
+- **Moonshot API Key**：用户在「⚙️ 配置」tab 自行填入，仅存本机 `chrome.storage.local`，不会上传任何服务器
+- **imgbb API Key**：当前仍硬编码在 `popup.js`（开发用），如需公开发布需移到配置面板
+- **temp1/ 抓包文件**：含 cookie / session，已 `.gitignore`，永不进库
+- **AI 识别图片**：图片以 base64 形式直接 POST 给 Moonshot，不会经过插件作者服务器
+
+---
+
+## 🐞 已知行为
+
+- **手写签名注入**为「一次性引信」模式：每次插件点【注入签名】只生效一次，被 hook 拦下后立即卸膛；想替换签名 → 回到插件再点【注入签名】重新 arm
+- **签名图床 URL 5 分钟有效**（imgbb 免费额度），目标页若延迟较久才发请求会拿到失效图
+
+---
+
+## 📝 开发提示
+
+- popup.js 是单文件大模块，所有逻辑都在 `DOMContentLoaded` 闭包内；改前先读 `ARCHITECTURE.md` 第 §2 节的"组合配置结构"
+- 加新国家 × 注册地组合：只需改 `requirements.json` 的 `countries` / `registrations` / `requirements`，不改 `popup.js`
+- 加新积木（AI 识别器 / 自动填充模块）：见 `ARCHITECTURE.md` 第 §3-§4 节
+
+---
+
+## 📜 License
+
+私有项目，仅供本团队内部使用。

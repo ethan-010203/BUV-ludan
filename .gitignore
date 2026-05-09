@@ -1,0 +1,54 @@
+# ============================================================
+# PL-tool2 Chrome Extension · .gitignore
+# ============================================================
+
+# ---- 抓包 / 调试临时文件 ---------------------------------------
+# 含 cookie、session、用户身份信息，不能进库
+temp1/
+*.har
+
+# ---- OS 噪声 -------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ---- 编辑器 / IDE --------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- Node / 依赖（万一以后引入构建工具） ----------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json.bak
+
+# ---- Python venv（工作区根目录有 .venv，本目录不该有；防御性忽略） -
+.venv/
+__pycache__/
+*.py[cod]
+
+# ---- 打包产物 ------------------------------------------------
+*.zip
+*.crx
+*.pem
+dist/
+build/
+
+# ---- 日志 ----------------------------------------------------
+*.log
+logs/
+
+# ---- 个人临时笔记 / 草稿 -------------------------------------
+TODO.local.md
+NOTES.local.md
+scratch/
