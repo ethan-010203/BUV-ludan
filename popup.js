@@ -653,9 +653,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 签名面板：绑定输入框 / 重新生成 / 注入按钮（仅绑定一次，避免重复事件）
   setupSignaturePanel();
 
-  // 顶部 tabs（主功能 / 配置）+ 配置 tab 的 API Key 表单
+  // 顶部 tabs（主功能 / 配置）
+  // 注意：配置 tab 的 API Key 表单 setupConfigForm() 必须放到 await loadApiKey() 之后，
+  // 否则它会在 apiKey 还是空字符串时就把 input.value 填成 ""，
+  // 导致用户重开 popup 时配置 tab 看起来"没保存过"（实际 storage 里有）。
   setupTabs();
-  setupConfigForm();
 
   // Status logger that writes to UI
   function statusLog(msg) {
@@ -3553,6 +3555,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 紧接着从 chrome.storage.local 加载 apiKey；loadConfig 必须先跑完，
   // 因为 loadApiKey 内做了一次性迁移：若 storage 里没有但 JSON legacy 字段有，则复制过来
   await loadApiKey();
+  // 配置 tab 的 API Key 表单：必须在 loadApiKey 之后初始化，
+  // 这样 input 框才能正确回填已保存的 key（修复重开 popup 看似未配置的 bug）
+  setupConfigForm();
   initCountrySelect();
 
   const saved = await loadState();
