@@ -1,6 +1,7 @@
 {
   "countries": {
-    "Poland": { "label": "波兰 (Poland)" }
+    "Poland": { "label": "波兰 (Poland)" },
+    "France": { "label": "法国 (France)" }
   },
   "registrations": {
     "China": { "label": "中国大陆 (China Mainland)" }
@@ -29,17 +30,17 @@
       ],
 
       "files": [
-        { "pattern": "身份证正面", "label": "身份证正面", "required": true, "matchType": "contains" },
-        { "pattern": "身份证反面", "label": "身份证反面", "required": true, "matchType": "contains" },
-        { "pattern": "营业执照", "label": "营业执照", "required": true, "matchType": "contains" },
-        { "pattern": "完税证明", "label": "完税证明", "required": true, "matchType": "contains" },
-        { "pattern": "店铺后台截图", "label": "店铺后台截图", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"] },
-        { "pattern": ".xlsx", "label": "基础信息表", "required": true, "matchType": "endsWith" }
+        { "key": "id_card_front", "pattern": "身份证正面", "label": "身份证正面", "required": true, "matchType": "contains" },
+        { "key": "id_card_back", "pattern": "身份证反面", "label": "身份证反面", "required": true, "matchType": "contains" },
+        { "key": "business_license", "pattern": "营业执照", "label": "营业执照", "required": true, "matchType": "contains", "showInAutofill": true, "autofillStatusLabel": "营业执照文件", "convertImageToPdf": true },
+        { "key": "tax_certificate", "pattern": "完税证明", "label": "完税证明", "required": true, "matchType": "contains", "showInAutofill": true, "autofillStatusLabel": "中国税收居民身份证明", "convertImageToPdf": true },
+        { "key": "shop_backend_screenshot", "pattern": "店铺后台截图", "label": "店铺后台截图", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"], "showInAutofill": true, "convertImageToPdf": false },
+        { "key": "basic_info", "pattern": ".xlsx", "label": "基础信息表", "required": true, "matchType": "endsWith", "xlsxA1Contains": "新注册申请登记表" }
       ],
 
       "placeholders": {
-        "完税证明":     { "kind": "pdf", "filename": "完税证明_临时占位.pdf",     "text": "完税证明（临时占位）" },
-        "店铺后台截图": { "kind": "png", "filename": "店铺后台截图_临时占位.png", "text": "店铺后台截图（临时占位）" }
+        "tax_certificate":         { "kind": "pdf", "filename": "完税证明_临时占位.pdf",     "text": "完税证明（临时占位）" },
+        "shop_backend_screenshot": { "kind": "png", "filename": "店铺后台截图_临时占位.png", "text": "店铺后台截图（临时占位）" }
       },
 
       "modules": [
@@ -47,8 +48,8 @@
           "title": "公司信息",
           "fields": [
             { "key": "公司名称",                       "source": "xlsx",       "cell": "C3" },
-            { "key": "营业执照",                       "source": "file_path",  "label": "营业执照" },
-            { "key": "中国税收居民身份证明",           "source": "file_path",  "label": "完税证明" },
+            { "key": "营业执照",                       "source": "file_path",  "fileKey": "business_license" },
+            { "key": "中国税收居民身份证明",           "source": "file_path",  "fileKey": "tax_certificate" },
             { "key": "营业执照号码/注册号",            "source": "xlsx",       "cell": "C10" },
             { "key": "公司类型",                       "source": "ai_license", "aiField": "类型" },
             { "key": "营业期限",                       "source": "default",    "value": "长期" },
@@ -67,8 +68,8 @@
           "title": "法人代表信息",
           "fields": [
             { "key": "上传法人代表证件信息",           "source": "idcard_or_passport" },
-            { "key": "法人代表身份证（人像面）",       "source": "file_path",       "label": "身份证正面" },
-            { "key": "法人代表身份证（国徽面）",       "source": "file_path",       "label": "身份证反面" },
+            { "key": "法人代表身份证（人像面）",       "source": "file_path",       "fileKey": "id_card_front" },
+            { "key": "法人代表身份证（国徽面）",       "source": "file_path",       "fileKey": "id_card_back" },
             { "key": "法人/个人代表中文名",            "source": "ai_idcard_front", "aiField": "姓名" },
             { "key": "法人/个人代表身份证号",          "source": "ai_idcard_front", "aiField": "身份证号" },
             { "key": "法人/个人代表拼音名（英文名）",  "source": "ai_idcard_front", "aiField": "拼音名" },
@@ -87,8 +88,101 @@
             { "key": "店铺链接",                          "source": "xlsx",    "cell": "C14" },
             { "key": "公司（个人）店铺主要经营范围",      "source": "default", "value": "电子商品 electrical products" },
             { "key": "公司英文名称",                      "source": "xlsx",    "cell": "C4" },
-            { "key": "公司/个体经营注册地址（英文）",     "source": "xlsx",    "cell": "C5" },
+            { "key": "公司/个体经营注册地址（英文）",     "source": "xlsx",    "cell": "C6" },
             { "key": "联系邮箱",                          "source": "xlsx",    "cell": "C20" }
+          ]
+        }
+      ]
+    },
+
+    "France|China": {
+      "label": "法国 - 中国大陆注册",
+
+      "addressLocale": "zh-CN",
+      "autofillModule": "france_seller_center",
+      "xlsxTemplate": "basic_info_v1",
+      "aiDocTypes": [
+        "cn_business_license",
+        "cn_id_card_front",
+        "cn_id_card_back",
+        "cn_company_articles"
+      ],
+
+      "fields": [
+        { "key": "id_card_front", "label": "身份证正面", "required": true },
+        { "key": "id_card_back", "label": "身份证反面", "required": true },
+        { "key": "business_license", "label": "营业执照", "required": true },
+        { "key": "company_articles", "label": "公司章程", "required": true },
+        { "key": "shop_backend_screenshot", "label": "店铺后台截图", "required": true },
+        { "key": "power_of_attorney", "label": "委托书盖章", "required": true },
+        { "key": "basic_info", "label": "基础信息表", "required": true }
+      ],
+
+      "files": [
+        { "key": "id_card_front", "pattern": "身份证正面", "label": "身份证正面", "required": true, "matchType": "contains" },
+        { "key": "id_card_back", "pattern": "身份证反面", "label": "身份证反面", "required": true, "matchType": "contains" },
+        { "key": "business_license", "pattern": "营业执照", "label": "营业执照", "required": true, "matchType": "contains", "showInAutofill": true, "autofillStatusLabel": "营业执照文件", "convertImageToPdf": true },
+        { "key": "company_articles", "pattern": "公司章程", "label": "公司章程", "required": true, "matchType": "contains", "showInAutofill": true, "autofillStatusLabel": "公司章程文件", "convertImageToPdf": true },
+        { "key": "shop_backend_screenshot", "pattern": "店铺后台截图", "label": "店铺后台截图", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"], "showInAutofill": true, "convertImageToPdf": false },
+        { "key": "power_of_attorney", "pattern": "委托书盖章", "label": "委托书盖章", "required": true, "matchType": "contains", "showInAutofill": true, "autofillStatusLabel": "委托书盖章文件", "convertImageToPdf": true },
+        { "key": "basic_info", "pattern": ".xlsx", "label": "基础信息表", "required": true, "matchType": "endsWith", "xlsxA1Contains": "新注册申请登记表" }
+      ],
+
+      "placeholders": {
+        "shop_backend_screenshot": { "kind": "png", "filename": "店铺后台截图_临时占位.png", "text": "店铺后台截图（临时占位）" },
+        "power_of_attorney":       { "kind": "pdf", "filename": "委托书盖章_临时占位.pdf", "text": "委托书盖章（临时占位）" }
+      },
+
+      "modules": [
+        {
+          "title": "公司信息",
+          "fields": [
+            { "key": "公司名称",                       "source": "xlsx",       "cell": "C3" },
+            { "key": "营业执照",                       "source": "file_path",  "fileKey": "business_license" },
+            { "key": "公司章程",                       "source": "file_path",  "fileKey": "company_articles" },
+            { "key": "营业执照号码/注册号",            "source": "xlsx",       "cell": "C8" },
+            { "key": "公司类型",                       "source": "ai_license", "aiField": "类型" },
+            { "key": "公司成立日期",                   "source": "ai_license", "aiField": "成立日期" },
+            { "key": "核准日期",                       "source": "ai_license", "aiField": "核准日期" },
+            { "key": "营业执照签发机关",               "source": "ai_license", "aiField": "登记机关" },
+            { "key": "公司/个体经营注册地址(中文)",    "source": "ai_license", "aiField": "住所" },
+            { "key": "邮编",                           "source": "xlsx",       "cell": "C7" },
+            { "key": "注册资本",                       "source": "ai_license", "aiField": "注册资本", "defaultValue": "100000" }
+          ]
+        },
+        {
+          "title": "法人代表信息",
+          "fields": [
+            { "key": "上传法人代表证件信息",           "source": "idcard_or_passport" },
+            { "key": "法人代表身份证（人像面）",       "source": "file_path",       "fileKey": "id_card_front" },
+            { "key": "法人代表身份证（国徽面）",       "source": "file_path",       "fileKey": "id_card_back" },
+            { "key": "法人/个人代表中文名",            "source": "ai_idcard_front", "aiField": "姓名" },
+            { "key": "法人/个人代表身份证号",          "source": "ai_idcard_front", "aiField": "身份证号" },
+            { "key": "法人/个人代表拼音名（英文名）",  "source": "ai_idcard_front", "aiField": "拼音名" },
+            { "key": "法人/个人代表出生日期",          "source": "ai_idcard_front", "aiField": "出生日期" },
+            { "key": "法人代表身份证有效期限",         "source": "ai_idcard_back",  "aiField": "有效期限" },
+            { "key": "法人/个人代表身份证地址",        "source": "ai_idcard_front", "aiField": "住址" },
+            { "key": "法人/个人代表身份证邮编",        "source": "postal_from_idcard_address" },
+            { "key": "性别",                           "source": "ai_idcard_front", "aiField": "性别" },
+            { "key": "民族",                           "source": "ai_idcard_front", "aiField": "民族" },
+            { "key": "身份证签发机关",                   "source": "ai_idcard_back",  "aiField": "签发机关" }
+          ]
+        },
+        {
+          "title": "店铺信息",
+          "fields": [
+            { "key": "主要销售平台",                       "source": "platform_from_url", "urlCell": "C13" },
+            { "key": "主要销售平台店铺链接",               "source": "xlsx",    "cell": "C13" },
+            { "key": "主要销售平台店铺ID",                 "source": "xlsx",    "cell": "C12" },
+            { "key": "公司英文名称",                       "source": "xlsx",    "cell": "C4" },
+            { "key": "公司/个体经营注册地址（英文）",      "source": "xlsx",    "cell": "C6" },
+            { "key": "联系邮箱",                           "source": "xlsx",    "cell": "C15" },
+            { "key": "公司（个人）店铺主要经营范围",       "source": "default", "value": "电子商品 electrical products" },
+            { "key": "是否已填写所有销售中的平台店铺信息", "source": "default", "value": "是" },
+            { "key": "未来12个月销售预估",                 "source": "default", "value": "100" },
+            { "key": "未来12个月预估税金",                 "source": "default", "value": "100" },
+            { "key": "公司(个人)店铺简称/名称",            "source": "xlsx",    "cell": "C11" },
+            { "key": "店铺联系电话",                       "source": "xlsx",    "cell": "C14" }
           ]
         }
       ]

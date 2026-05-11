@@ -64,8 +64,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 这两个 helper 只是从当前组合配置里取值，使下方代码读起来更直观。
   // pdf 用于上传框 accept=".pdf" 的字段（如 完税证明）。
   // png 用于必须保留为图片的字段（如 店铺后台截图，要求 JPG/JPEG/PNG）。
-  function getPlaceholderConfig(label) {
-    return (currentReqConfig && currentReqConfig.placeholders && currentReqConfig.placeholders[label]) || null;
+  function getPlaceholderConfig(key) {
+    return (currentReqConfig && currentReqConfig.placeholders && currentReqConfig.placeholders[key]) || null;
   }
   function getCurrentModules() {
     return (currentReqConfig && Array.isArray(currentReqConfig.modules)) ? currentReqConfig.modules : [];
@@ -347,25 +347,31 @@ document.addEventListener("DOMContentLoaded", async () => {
 2. 身份证正面：图片主体是**一张中国居民身份证的人像面**，必须能看到清晰的人物头像 + "姓名"、"性别"、"民族"、"出生"、"住址"、"公民身份号码"等中文字段，缺一个关键字段都不算。
 3. 身份证反面：图片主体是**一张中国居民身份证的国徽面**，必须能同时看到"中华人民共和国居民身份证"标题 + "签发机关" + "有效期限"中文字段，缺一个都不算。
 4. 完税证明：图片主体是**一张完税证明文件**，标题含"完税证明"或"税收完税证明"，包含纳税人、税款等中文字段。
+5. 公司章程：图片是**公司章程文档的页面**（通常是 PDF 首页或目录页），命中以下任一关键特征即可判定：
+   - 显著位置出现"公司章程"或"章程"作为标题/主标题；
+   - 出现"第一章"、"第一章摘要"、"第一章 总则"、"目录"等章程章节性标题。
+   备注：公司章程是中文 PDF 渲染出的纯文本页面（白底黑字，无软件 UI 边框），看到大段中文条款 + 章节序号即可视为"文档页面"，**不要**当成 Word/PPT 截图排除掉。
 
 **必须返回"未知类型"的情况（强制）：**
 - 网页截图、浏览器界面、后台管理系统、卖家中心、商家中心、表单、Dashboard
 - 英文界面、英文表单、英文文档（中国证件全部是中文，看到大量英文几乎可断定不是）
-- Excel / Word / PPT 截图、表格列表
+- Excel / Word / PPT **软件界面**截图（顶部菜单栏、工具栏可见）、表格列表
 - 仅看到证件的某一栏、某个字段、缩略图、预览图
 - 看不清完整证件原件、模糊不清、被严重遮挡
-- 不满足上述4种类型字段要求的任何图片
+- 不满足上述5种类型字段要求的任何图片
 
 **判断步骤（必须严格遵守）：**
 1. 先看图片整体：是网页UI还是单一文档？是网页/UI → 直接"未知类型"
 2. 再看语言：满屏英文 → "未知类型"
 3. 最后核对该类型要求的中文字段是否**全部**可见，缺任何一个 → "未知类型"
+4. 公司章程例外：只要命中"章程"标题或"第一章"等章节标题之一即可返回"公司章程"
 
 只输出以下之一，不要任何解释、不要任何标点：
 营业执照
 身份证正面
 身份证反面
 完税证明
+公司章程
 未知类型
 
 绝对严禁编造，宁可错判为"未知类型"也不要乱猜。`;
@@ -406,6 +412,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         '身份证正面': '身份证正面',
         '身份证反面': '身份证反面',
         '完税证明': '完税证明',
+        '公司章程': '公司章程',
         '未知类型': null
       };
 
@@ -423,8 +430,35 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // --- Step 1: Populate country dropdown ---
+  // 只列出 requirements 里实际配置过的国家（从组合 key "Country|Registration" 提取并去重）。
+  // 这样用户永远不会选到一个没有任何组合配置的国家，避免落到红色 "该组合暂无配置" 警告。
+  function getConfiguredCountries() {
+    const set = new Set();
+    for (const reqKey of Object.keys(config.requirements || {})) {
+      const country = reqKey.split("|")[0];
+      if (country && config.countries[country]) set.add(country);
+    }
+    return set;
+  }
+
+  // 给定国家，返回该国家在 requirements 里出现过的注册地列表（保留首次出现顺序）。
+  function getRegistrationsForCountry(countryKey) {
+    const list = [];
+    const seen = new Set();
+    for (const reqKey of Object.keys(config.requirements || {})) {
+      const [c, r] = reqKey.split("|");
+      if (c === countryKey && r && config.registrations[r] && !seen.has(r)) {
+        seen.add(r);
+        list.push(r);
+      }
+    }
+    return list;
+  }
+
   function initCountrySelect() {
+    const configured = getConfiguredCountries();
     Object.keys(config.countries).forEach(key => {
+      if (!configured.has(key)) return;
       const opt = document.createElement("option");
       opt.value = key;
       opt.textContent = config.countries[key].label;
@@ -445,7 +479,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const regKeys = Object.keys(config.registrations);
+    const regKeys = getRegistrationsForCountry(countryKey);
     registrationSelect.disabled = false;
     registrationSelect.innerHTML = '<option value="">-- 请选择注册地 --</option>';
 
@@ -684,6 +718,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   //   ai_license                 — AI-extracted field from 营业执照 image
   //   ai_idcard_front            — AI-extracted field from 身份证正面 image
   //   ai_idcard_back             — AI-extracted field from 身份证反面 image
+  //   platform_from_url          — derive "主要销售平台" from a xlsx 店铺链接 cell (urlCell):
+  //                                  aliexpress→速卖通 / amazon→亚马逊 / temu→Temu / tiktok→TikTok / 其他→其他
   //   postal_from_idcard_address — 根据身份证地址查邮编
   //   idcard_or_passport         — 根据是否检测到身份证返回 "法人身份证"
   //   default                    — hardcoded default value (字段 value)
@@ -912,6 +948,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   "姓拼音": "姓的拼音（首字母大写其余小写）。注意单姓与复姓的区分：单姓如'张'='Zhang'、'李'='Li'；复姓如'欧阳'='OuYang'、'司马'='SiMa'、'诸葛'='ZhuGe'、'上官'='ShangGuan'、'东方'='DongFang'。示例：'张三'→'Zhang'，'欧阳娜娜'→'OuYang'，'司马懿'→'SiMa'。",
   "名拼音": "名的拼音（每个汉字首字母大写其余小写，整体拼接，无空格无分隔）。示例：'张三'→'San'，'李小明'→'XiaoMing'，'欧阳娜娜'→'NaNa'，'司马懿'→'Yi'。",
   "性别": "性别，只输出'男'或'女'。",
+  "民族": "民族字段原文（不含'族'字也保留），例如'汉'、'回'、'藏'、'蒙古'、'维吾尔'、'壮'等。",
   "出生日期": "出生日期，输出格式 YYYY-MM-DD（如 1990-01-15）。",
   "身份证号": "18位身份证号码，纯数字（最后一位可能是X，保持大写）。",
   "住址": "住址字段的完整原文。"
@@ -923,12 +960,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // AI: extract structured fields from a 身份证反面 (国徽面) image
   async function extractIdCardBackFields(base64Data, mimeType) {
-    const prompt = `这是一张中国居民身份证国徽面图片。请识别"有效期限"字段，以严格的JSON格式输出：
+    const prompt = `这是一张中国居民身份证国徽面图片。请识别"签发机关"和"有效期限"字段，以严格的JSON格式输出：
 {
+  "签发机关": "签发机关字段原文，通常是'XX市公安局XX分局'或'XX县公安局'格式，例如'北京市公安局海淀分局'、'义乌市公安局'。",
   "有效期限": "身份证有效期限原文，例如'2020.05.20-2040.05.20'、'2020.05.20-长期'。保持原始分隔符与格式。"
 }
 
-只输出JSON对象，不要任何额外解释。识别不到值为null。`;
+只输出JSON对象，不要任何额外解释。每个字段如果识别不到，值为null。`;
     return callVisionJson(base64Data, mimeType, prompt, "AI身份证反面");
   }
 
@@ -939,6 +977,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 {
   "类型": "公司类型，例如'有限责任公司'、'有限责任公司(自然人投资或控股)'、'个体工商户'、'股份有限公司'等。原样输出执照上写的内容。",
   "成立日期": "成立日期或注册日期，输出格式 YYYY-MM-DD（如 2024-09-15）。如果只有'注册日期'就用注册日期。",
+  "核准日期": "核准日期，通常出现在营业执照右下角'登记机关'印章下方，标签可能是'核准日期'、'登记日期'或位于登记机关下方未标注的日期文本。输出格式 YYYY-MM-DD（如 2024-09-15）。如果执照上没有此字段，值为null。**与'成立日期'区分**：成立日期通常在执照左侧字段区，核准日期位于右下角登记机关印章附近。",
   "住所": "执照上'住所'或'经营场所'或'营业场所'字段的完整地址原文，例如'浙江省金华市义乌市XX街道XX号'。",
   "登记机关": "登记机关（或发照机关）的完整名称，必须补全为'省+市+区/县+机关'或'省+市+机关'或'直辖市+区+机关'的完整行政区划前缀格式。请结合执照上'住所'字段里的省/市信息补全前缀，不要重复。示例：\n    - 执照登记机关是'义乌市市场监督管理局'，住所在浙江省金华市义乌市 → 输出'浙江省金华市义乌市市场监督管理局'\n    - 执照登记机关是'金华市市场监督管理局'，住所在浙江省金华市 → 输出'浙江省金华市市场监督管理局'（不要写成'浙江省金华市金华市市场监督管理局'）\n    - 执照登记机关是'海淀区市场监督管理局'，住所在北京市海淀区 → 输出'北京市海淀区市场监督管理局'\n    - 执照登记机关是'广东省市场监督管理局' → 原样输出'广东省市场监督管理局'",
   "注册资本": "注册资本金额，必须转为阿拉伯数字 + '元'结尾。规则：识别执照上的金额（无论是中文大写如'壹佰万元'还是阿拉伯数字如'100万元'），统一换算为元的整数。例如：'壹佰万元整' → '1000000元'，'100万元人民币' → '1000000元'，'5000万元' → '50000000元'，'壹拾万元' → '100000元'。如果执照上没有此字段（个体工商户通常没有），值为null。"
@@ -981,7 +1020,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function buildModuleData(result) {
     // Source: xlsx sheet
     let sheet = null;
-    const xlsxFound = result.found.find(f => f.label === "基础信息表");
+    const xlsxFound = result.found.find(f => f.key === "basic_info");
     if (xlsxFound && xlsxFound.file && xlsxFound.file.file instanceof File) {
       try {
         sheet = await loadXlsxSheet(xlsxFound.file.file);
@@ -992,7 +1031,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Source: AI license fields (only call if 营业执照 has imageData)
     let aiLicense = {};
-    const licenseFound = result.found.find(f => f.label === "营业执照");
+    const licenseFound = result.found.find(f => f.key === "business_license");
     if (licenseFound && licenseFound.imageData) {
       statusLog(`[AI提取] 解析营业执照字段...`);
       const t0 = Date.now();
@@ -1011,7 +1050,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Source: AI 身份证正面 fields
     let aiIdCardFront = {};
-    const idFrontFound = result.found.find(f => f.label === "身份证正面");
+    const idFrontFound = result.found.find(f => f.key === "id_card_front");
     if (idFrontFound && idFrontFound.imageData) {
       statusLog(`[AI提取] 解析身份证正面字段...`);
       const t0 = Date.now();
@@ -1021,7 +1060,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Source: AI 身份证反面 fields
     let aiIdCardBack = {};
-    const idBackFound = result.found.find(f => f.label === "身份证反面");
+    const idBackFound = result.found.find(f => f.key === "id_card_back");
     if (idBackFound && idBackFound.imageData) {
       statusLog(`[AI提取] 解析身份证反面字段...`);
       const t0 = Date.now();
@@ -1052,7 +1091,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             value = getXlsxCell(sheet, f.cell);
             break;
           case "file_path": {
-            const item = result.found.find(x => x.label === f.label);
+            const item = result.found.find(x => x.key === f.fileKey);
             value = item && item.file ? (item.file.path || item.file.name || "") : "";
             break;
           }
@@ -1078,6 +1117,23 @@ document.addEventListener("DOMContentLoaded", async () => {
           case "idcard_or_passport":
             value = idCardOrPassportLabel;
             break;
+          case "platform_from_url": {
+            // 根据 基础信息表 里的店铺链接 cell 派生"主要销售平台"：
+            //   - 链接含 'amazon'     → '亚马逊'   (e.g. amazon.fr/sp?...&seller=...)
+            //   - 链接含 'temu'       → 'Temu'     (e.g. temu.com/mall.html?mall_id=...)
+            //   - 链接含 'aliexpress' → '速卖通'   (e.g. aliexpress.ru/store/...)
+            //   - 链接含 'tiktok'     → 'TikTok'   (e.g. seller.eu.tiktokshopglobalselling.com/...)
+            //   - 其它非空链接         → '其他'
+            //   - 空链接               → ''（让 defaultValue 兜底）
+            const url = (getXlsxCell(sheet, f.urlCell) || "").toLowerCase();
+            if (!url) value = "";
+            else if (url.includes("amazon")) value = "亚马逊";
+            else if (url.includes("temu")) value = "Temu";
+            else if (url.includes("aliexpress")) value = "速卖通";
+            else if (url.includes("tiktok")) value = "TikTok";
+            else value = "其他";
+            break;
+          }
           case "default":
             value = f.value || "";
             break;
@@ -1241,27 +1297,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Show autofill button when there is at least something in 公司信息 to push to the page.
+  // 按当前组合的 currentReqConfig.files 动态列出需要上传的文件状态。
+  // 哪些文件出现在面板、怎么显示名、是否提示“图片→自动转 PDF”均由配置控制：
+  //   showInAutofill: true             —— 该文件要在面板里显示一行状态。
+  //   autofillStatusLabel: "营业执照文件" —— 可选，面板里显示的文案（表单字段名与文件名可能不一致）。
+  //   convertImageToPdf: true          —— 可选，上传前会把图片转成 PDF，面板会提示。
   function renderAutofillButton(result) {
     const area = document.getElementById("autofill-area");
     const status = document.getElementById("autofill-status");
     const btn = document.getElementById("autofill-btn");
-    const license = result?.found?.find(f => f.label === "营业执照");
-    const taxRes = result?.found?.find(f => f.label === "完税证明" || f.label === "中国税收居民身份证明");
-    const shopShot = result?.found?.find(f => f.label === "店铺后台截图");
-    const hasLicenseFile = license && license.file && license.file.file instanceof File;
-    const hasTaxFile = taxRes && taxRes.file && taxRes.file.file instanceof File;
-    const hasShopShotFile = shopShot && shopShot.file && shopShot.file.file instanceof File;
+
+    area.style.display = "";
+    btn.disabled = false;
 
     const isImg = (n) => /\.(jpe?g|png|gif|webp|bmp)$/i.test(n || "");
     const tag = (item) => item?.placeholder ? "（临时占位）" : "";
-    area.style.display = "";
-    btn.disabled = false;
+
+    const fileReqs = (currentReqConfig?.files || []).filter(req => req && req.showInAutofill);
     const lines = [];
-    lines.push(`营业执照文件：${hasLicenseFile ? "✅ " + license.file.name + tag(license) + (isImg(license.file.name) ? "（图片→自动转 PDF）" : "") : "⚠️ 未识别（不会上传文件）"}`);
-    lines.push(`中国税收居民身份证明：${hasTaxFile ? "✅ " + taxRes.file.name + tag(taxRes) + (isImg(taxRes.file.name) ? "（图片→自动转 PDF）" : "") : "⚠️ 未识别（不会上传文件）"}`);
-    lines.push(`店铺后台截图：${hasShopShotFile ? "✅ " + shopShot.file.name + tag(shopShot) : "⚠️ 未识别（不会上传文件）"}`);
-    lines.push("点击按钮：填充文本字段 + 上传文件 + 选择日期 / 省市区");
+    for (const fileReq of fileReqs) {
+      const item = result?.found?.find(f => f.key === fileReq.key);
+      const hasFile = !!(item && item.file && item.file.file instanceof File);
+      const willConvert = !!(fileReq.convertImageToPdf && hasFile && isImg(item.file.name));
+      const convertHint = willConvert ? "（图片→自动转 PDF）" : "";
+      const displayLabel = fileReq.autofillStatusLabel || fileReq.label || fileReq.key;
+      lines.push(
+        `${displayLabel}：${hasFile
+          ? "✅ " + item.file.name + tag(item) + convertHint
+          : "⚠️ 未识别（不会上传文件）"}`
+      );
+    }
+    if (lines.length > 0) {
+      lines.push("点击按钮：填充文本字段 + 上传文件 + 选择日期 / 省市区");
+    }
     status.textContent = lines.join("\n");
     status.style.color = "#475569";
 
@@ -1429,9 +1497,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     return new File([pdfBytes], filename, { type: "application/pdf" });
   }
 
-  async function generatePlaceholderFile(label) {
-    const cfg = getPlaceholderConfig(label);
-    if (!cfg) throw new Error(`未配置占位生成: ${label}`);
+  async function generatePlaceholderFile(key) {
+    const cfg = getPlaceholderConfig(key);
+    if (!cfg) throw new Error(`未配置占位生成: ${key}`);
     if (cfg.kind === "pdf") return createBlankPdfFile(cfg.filename, cfg.text);
     if (cfg.kind === "png") return createBlankPngFile(cfg.filename, cfg.text);
     throw new Error(`未知占位类型: ${cfg.kind}`);
@@ -1439,18 +1507,25 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 在缺失项上生成临时占位文件，并把它"塞回" uploadedFiles 与 lastValidationResult，
   // 让后续渲染、模块构建、一键注入都能像识别成功一样使用它。
-  async function applyPlaceholder(label) {
+  async function applyPlaceholder(key) {
     if (!lastValidationResult) {
-      statusLog(`[占位] 请先完成检查再生成 ${label}`);
+      statusLog(`[占位] 请先完成检查再生成 ${key}`);
       return;
     }
-    if (lastValidationResult.found.some(f => f.label === label)) {
-      statusLog(`[占位] ${label} 已存在，跳过`);
+    if (lastValidationResult.found.some(f => f.key === key)) {
+      statusLog(`[占位] ${key} 已存在，跳过`);
       return;
     }
 
-    const file = await generatePlaceholderFile(label);
-    placeholderState[label] = file;
+    const req = (currentReqConfig?.files || []).find(r => r.key === key);
+    if (!req) {
+      statusLog(`[占位] 未在配置里找到 key=${key}`);
+      return;
+    }
+    const displayLabel = req.label || key;
+
+    const file = await generatePlaceholderFile(key);
+    placeholderState[key] = file;
 
     const fileMeta = {
       name: file.name,
@@ -1461,17 +1536,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
     uploadedFiles.push(fileMeta);
 
-    const req = (currentReqConfig?.files || []).find(r => r.label === label) || {
-      pattern: label, label, required: true, matchType: "contains"
-    };
     lastValidationResult.found.push({
       ...req,
       file: fileMeta,
       placeholder: true
     });
-    lastValidationResult.missing = lastValidationResult.missing.filter(m => m.label !== label);
+    lastValidationResult.missing = lastValidationResult.missing.filter(m => m.key !== key);
 
-    statusLog(`[占位] 已生成 ${label} → ${file.name}（${file.size} 字节）`);
+    statusLog(`[占位] 已生成 ${displayLabel} → ${file.name}（${file.size} 字节）`);
 
     updateFileCount();
     renderDetectionResults(lastValidationResult);
@@ -1492,7 +1564,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       for (const field of mod.fields) {
         const fcfg = cfg.fields.find(f => f.key === field.key);
         if (fcfg && fcfg.source === "file_path") {
-          const item = lastValidationResult.found.find(x => x.label === fcfg.label);
+          const item = lastValidationResult.found.find(x => x.key === fcfg.fileKey);
           field.value = item && item.file ? (item.file.path || item.file.name || "") : "";
         }
       }
@@ -1704,12 +1776,26 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     async function handleText(item) {
       if (!item.value) return { ok: true, skipped: true, msg: "空值跳过" };
-      // 定位优先级：xpath（最精确） > labelText（按表单标签 + elementSelector） > placeholder（全局首个匹配）
+      // 定位优先级：xpath > elementSelector(独立，最稳健) > labelText+elementSelector > placeholder
+      // 注：elementSelector 独立路径仅在没有 labelText 时启用，保持向后兼容
+      //（旧用法里 elementSelector 是 labelText 的 sub-filter，例如 'textarea[placeholder="..."]'）
       let input = null;
       let how = "";
       if (item.xpath) {
         input = findByXPath(item.xpath);
         if (input) how = "xpath";
+      }
+      if (!input && item.elementSelector && !item.labelText) {
+        // 仅当 selector 含 id / 属性 / class（即 [ # . 三种符号之一）时才视为「足够特定」，
+        // 直接 querySelector 全文匹配。bare tag 如 "textarea" / "input" 会拿到页面第一个
+        // 同类元素，这种情况下旧 plan（如波兰）把 elementSelector 当作 labelText 的 sub-filter
+        // 写，没设 labelText 时本来是 dead-code —— 这里也保持 dead，避免误命中。
+        if (/[\[#.]/.test(item.elementSelector)) {
+          try {
+            input = document.querySelector(item.elementSelector);
+            if (input) how = "elementSelector";
+          } catch (_) { /* invalid selector, fall through */ }
+        }
       }
       if (!input && item.labelText) {
         const sel = item.elementSelector || "input, textarea";
@@ -1723,6 +1809,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!input) {
         const tags = [
           item.xpath && `xpath`,
+          item.elementSelector && !item.labelText && `elementSelector="${item.elementSelector}"`,
           item.labelText && `labelText="${item.labelText}"`,
           item.placeholder && `placeholder="${item.placeholder}"`
         ].filter(Boolean).join(" / ");
@@ -2015,17 +2102,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     async function handleSelect(item) {
       if (!item.value) return { ok: true, skipped: true, msg: "空值跳过" };
 
-      // Find by placeholder span (always present in DOM, even when hidden behind a selected value)
-      const phSpans = document.querySelectorAll(".ant-select-selection__placeholder");
+      // 定位优先级：elementSelector(独立 id 选择器) > placeholder
+      // placeholder 模式仅在「页面尚未选过值」时可靠 —— 一旦被选过，.ant-select-selection__placeholder
+      // 会被替换为 .ant-select-selection-selected-value，placeholder 文案就消失了。
       let trigger = null;
-      for (const sp of phSpans) {
-        const t = (sp.textContent || "").trim();
-        if (t === item.placeholder || t.includes(item.placeholder)) {
-          trigger = sp.closest(".ant-select");
-          if (trigger) break;
+      if (item.elementSelector) {
+        try {
+          const el = document.querySelector(item.elementSelector);
+          if (el) trigger = el.classList?.contains("ant-select") ? el : el.closest(".ant-select");
+        } catch (_) { /* invalid selector, fall through */ }
+        if (!trigger) return { ok: false, error: `未找到 ant-select elementSelector="${item.elementSelector}"` };
+      } else {
+        // Find by placeholder span (only present when nothing has been selected yet)
+        // 同时做全角→半角括号归一，让 plan 写"（个人）" / 页面写"(个人)" 也能互相命中。
+        const normParenLookup = (s) => String(s || "").replace(/[（]/g, "(").replace(/[）]/g, ")").trim();
+        const phN = normParenLookup(item.placeholder);
+        const phSpans = document.querySelectorAll(".ant-select-selection__placeholder");
+        for (const sp of phSpans) {
+          const tN = normParenLookup(sp.textContent);
+          if (tN === phN || (phN && tN.includes(phN))) {
+            trigger = sp.closest(".ant-select");
+            if (trigger) break;
+          }
         }
+        if (!trigger) return { ok: false, error: `未找到 ant-select placeholder="${item.placeholder}"` };
       }
-      if (!trigger) return { ok: false, error: `未找到 ant-select placeholder="${item.placeholder}"` };
 
       const isMultiple = trigger.classList.contains("ant-select-multiple")
         || trigger.classList.contains("ant-select-selection--multiple");
@@ -2054,16 +2155,22 @@ document.addEventListener("DOMContentLoaded", async () => {
         return (2 * p * r) / (p + r);
       };
 
+      // 全角括号归一化：AI 提取的"有限责任公司(自然人独资)"半角括号，
+      // 页面选项是"有限责任公司（自然人独资）"全角括号，归一化后才能精确等值匹配。
+      const normParen = (s) => String(s).replace(/[（]/g, "(").replace(/[）]/g, ")").trim();
       const value = String(item.value);
+      const valueN = normParen(value);
       const optTexts = lis.map((li) => (li.textContent || "").trim());
+      const optTextsN = optTexts.map(normParen);
 
-      // 1. Exact match wins
-      let idx = optTexts.indexOf(value);
-      // 2. Otherwise pick the highest-F1 option (must clear a low threshold to avoid garbage)
+      // 1. Exact match (after paren normalization) wins
+      let idx = optTextsN.indexOf(valueN);
+      // 2. Otherwise pick the highest-F1 option using normalized strings
+      //    (避免 "有限责任公司" 这种短名以子集胜过 "有限责任公司（自然人独资）" 全集)
       if (idx < 0) {
         let bestScore = 0, bestIdx = -1;
-        for (let i = 0; i < optTexts.length; i++) {
-          const s = score(value, optTexts[i]);
+        for (let i = 0; i < optTextsN.length; i++) {
+          const s = score(valueN, optTextsN[i]);
           if (s > bestScore) { bestScore = s; bestIdx = i; }
         }
         if (bestScore >= 0.4) idx = bestIdx;
@@ -2101,9 +2208,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     async function handleCascader(item) {
       if (!item.value) return { ok: true, skipped: true, msg: "空值跳过" };
-      // 优先用 labelText 精确定位（多个 cascader 共享同一 placeholder 时必须用 label 区分）
+      // 定位优先级：elementSelector(独立 id 选择器) > labelText > placeholder
+      // 含逗号的 id（如 "0,2,2,0,0"）必须用属性选择器 [id="..."]，CSS #id 写法不可行
       let input = null;
-      if (item.labelText) {
+      if (item.elementSelector) {
+        try {
+          input = document.querySelector(item.elementSelector);
+        } catch (_) { /* invalid selector, fall through */ }
+        if (!input) {
+          return { ok: false, error: `未找到 cascader elementSelector="${item.elementSelector}"` };
+        }
+      } else if (item.labelText) {
         input = findInputByLabelText(item.labelText, "input.ant-cascader-input");
         if (!input) {
           return { ok: false, error: `未找到 cascader labelText="${item.labelText}"` };
@@ -2148,10 +2263,34 @@ document.addEventListener("DOMContentLoaded", async () => {
         const items = menus[level].querySelectorAll("li.ant-cascader-menu-item");
         if (items.length === 0) break;
 
-        const target = matchItem(items, valueStr);
+        let target = matchItem(items, valueStr);
         if (!target) {
           if (level === 0) return { ok: false, error: `cascader 第 1 级匹配不到 (value="${valueStr}")` };
-          // Otherwise allow partial match (e.g., only province/city, no district)
+
+          // 中间级失配 fallback：地址有时跳过地级市直接到县（如"广东省丰顺县XXX"省略"梅州市"）。
+          // 逐个展开当前级候选，看哪个候选的下一级菜单里能匹配到 valueStr，把它当作正确的父节点。
+          // 仅在能展开（非叶子）的候选里尝试，避免误开禁用项。
+          if (level < maxLevels - 1) {
+            let foundParent = null;
+            for (const candidate of items) {
+              if (!candidate.classList.contains("ant-cascader-menu-item-expand")) continue;
+              candidate.click();
+              await sleep(220);
+              const subMenus = open.querySelectorAll("ul.ant-cascader-menu");
+              if (subMenus.length > level + 1) {
+                const subItems = subMenus[level + 1].querySelectorAll("li.ant-cascader-menu-item");
+                if (matchItem(subItems, valueStr)) { foundParent = candidate; break; }
+              }
+            }
+            if (foundParent) {
+              const parentText = (foundParent.getAttribute("title") || foundParent.textContent).trim();
+              picked.push(parentText);
+              await sleep(120);
+              level++;
+              continue; // 下一轮在新展开的 level+1 菜单里继续匹配
+            }
+          }
+          // 所有候选都不含目标，接受到目前为止的部分选中（如只选了省级）
           break;
         }
         const text = (target.getAttribute("title") || target.textContent).trim();
@@ -2451,228 +2590,98 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ============================================================================
+  // 自动填充模块注册表（积木 dispatcher）
+  // ============================================================================
+  // 每个 autofillModule ID 对应一份独立的 buildPlan 实现，放在 autofill/ 目录下。
+  // 加新销售目的地时只需要：
+  //   1) 在 autofill/ 下新建 <id>.js（模板可参考 autofill/poland_seller_center.js）
+  //   2) 在下方 AUTOFILL_REGISTRY 加一行 dynamic import
+  //   3) 在 requirements.json 新组合的 autofillModule 字段填上该 ID
+  // 不需要改 buildAutofillPlan 本身。注册表里没登记的 ID 会在启动时报错（见
+  // validateConfigBricks）+ 运行时给出明确错误（见 buildAutofillPlan 的 throw）。
+  // ============================================================================
+  const AUTOFILL_REGISTRY = {
+    poland_seller_center: () => import("./autofill/poland_seller_center.js"),
+    france_seller_center: () => import("./autofill/france_seller_center.js"),
+  };
+
+  // 启动时校验：每个组合声明的 autofillModule 是否已在 AUTOFILL_REGISTRY 注册。
+  // 不通过的组合会在控制台 console.error 列出，方便开发期及时发现 typo / 漏注册。
+  // （aiDocTypes / addressLocale / xlsxTemplate 当前 Stage 1 仍是元数据，
+  //   等 Sprint 3 / Sprint 4 拆出对应注册表后再扩展本函数。）
+  function validateConfigBricks() {
+    if (!config || typeof config !== "object") return;
+    const issues = [];
+    const requirements = config.requirements || {};
+    for (const [comboKey, combo] of Object.entries(requirements)) {
+      const m = combo && combo.autofillModule;
+      if (!m) {
+        issues.push(`[${comboKey}] 缺少 autofillModule 字段（requirements.json）`);
+      } else if (!AUTOFILL_REGISTRY[m]) {
+        issues.push(
+          `[${comboKey}] autofillModule "${m}" 未在 popup.js 的 AUTOFILL_REGISTRY 注册` +
+          `，请加上：${m}: () => import('./autofill/${m}.js'),`
+        );
+      }
+    }
+    if (issues.length > 0) {
+      console.error(
+        "[配置校验] 发现 " + issues.length + " 个问题：\n  " + issues.join("\n  ")
+      );
+    } else {
+      console.log(
+        "[配置校验] 已通过：" + Object.keys(requirements).length +
+        " 个组合的 autofillModule 引用均有效"
+      );
+    }
+  }
+
+  // ============================================================================
   // Build the autofill plan from lastValidationResult + lastModulesData
   // ============================================================================
+  // 本函数只是 dispatcher：根据当前组合的 autofillModule 字段动态加载对应积木，
+  // 把数据 + 通用工具传过去，让积木产出 plan。具体每个销售目的地的 plan 内容
+  // 都在 autofill/<id>.js 里定义。
   async function buildAutofillPlan() {
-    const moduleData = (lastModulesData || []).find((m) => m.title === "公司信息");
-    const fields = moduleData?.fields || [];
-    const get = (key) => (fields.find((f) => f.key === key)?.value || "").trim();
-
-    const license = lastValidationResult?.found?.find((f) => f.label === "营业执照");
-    const taxRes = lastValidationResult?.found?.find((f) => f.label === "完税证明" || f.label === "中国税收居民身份证明");
-
-    async function fileToPayload(found, opts = {}) {
-      if (!found || !(found.file && found.file.file instanceof File)) return null;
-      const f = found.file.file;
-      // keepImage：上传框接受图片（如 店铺后台截图 要求 JPG/JPEG/PNG），不要把图片转成 PDF。
-      if (opts.keepImage) {
-        const lowerType = (f.type || "").toLowerCase();
-        const lowerName = (f.name || "").toLowerCase();
-        const isImg = lowerType.startsWith("image/")
-          || /\.(png|jpe?g|gif|webp|bmp)$/i.test(lowerName);
-        if (isImg) {
-          const base64 = await fileToBase64Plain(f);
-          const fileType = f.type || (lowerName.endsWith(".png") ? "image/png" : "image/jpeg");
-          return { name: f.name, fileType, base64, converted: false };
-        }
-        // 非图片文件（极少见）走默认 PDF 逻辑作为兜底
-      }
-      // 多页 PDF（如身份证正反面合一）需要按检测到的页码拆分上传：
-      // detectFiles 在 path 末尾追加了 " (第N页)"，且 imageData 已经是该页的 JPEG base64。
-      const pageMatch = (found.file.path || "").match(/\(第(\d+)页\)/);
-      if (pageMatch && found.imageData) {
-        // 把单页 JPEG 包装成单页 PDF
-        const dataUrl = `data:${found.mimeType || "image/jpeg"};base64,${found.imageData}`;
-        const img = await new Promise((resolve, reject) => {
-          const im = new Image();
-          im.onload = () => resolve(im);
-          im.onerror = () => reject(new Error("PDF 单页解码失败"));
-          im.src = dataUrl;
-        });
-        const W = img.naturalWidth || img.width;
-        const H = img.naturalHeight || img.height;
-        if (!W || !H) throw new Error("PDF 单页尺寸读取失败");
-        const bin = atob(found.imageData);
-        const jpegBytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) jpegBytes[i] = bin.charCodeAt(i);
-        const pdfBytes = buildSinglePagePdfFromJpeg(jpegBytes, W, H);
-        const baseName = (f.name || "page").replace(/\.[^.\\/]+$/, "");
-        const blob = new Blob([pdfBytes], { type: "application/pdf" });
-        const base64 = await fileToBase64Plain(blob);
-        return {
-          name: `${baseName}_p${pageMatch[1]}.pdf`,
-          fileType: "application/pdf",
-          base64,
-          converted: true
-        };
-      }
-      // 上传框 accept=".pdf"：图片必须先转 PDF；本身已是 PDF 则原样上传
-      const { blob, name, converted } = await imageFileToPdfBlob(f);
-      const base64 = await fileToBase64Plain(blob);
-      return { name, fileType: "application/pdf", base64, converted };
+    const moduleId = currentReqConfig?.autofillModule;
+    if (!moduleId) {
+      throw new Error("当前组合 requirements.json 未配置 autofillModule 字段");
+    }
+    const loader = AUTOFILL_REGISTRY[moduleId];
+    if (!loader) {
+      throw new Error(
+        `未注册的填充模块: "${moduleId}"\n` +
+        `请在 popup.js 顶部 AUTOFILL_REGISTRY 里加上一行：\n` +
+        `  ${moduleId}: () => import('./autofill/${moduleId}.js'),`
+      );
+    }
+    let mod;
+    try {
+      mod = await loader();
+    } catch (e) {
+      throw new Error(
+        `填充模块 ${moduleId} 加载失败：${e?.message || e}\n` +
+        `请确认 autofill/${moduleId}.js 文件存在且无语法错误`
+      );
+    }
+    const brick = mod && mod.default;
+    if (!brick || typeof brick.buildPlan !== "function") {
+      throw new Error(
+        `填充模块 ${moduleId} 没有正确导出 default { id, buildPlan(...) }`
+      );
     }
 
-    const licensePayload = await fileToPayload(license);
-    const taxPayload = await fileToPayload(taxRes);
-    // 店铺后台截图：要求 JPG/JPEG/PNG 直接上传，不能像营业执照那样转 PDF
-    const shopScreenshot = lastValidationResult?.found?.find((f) => f.label === "店铺后台截图");
-    const shopScreenshotPayload = await fileToPayload(shopScreenshot, { keepImage: true });
-
-    // 公司/个体经营注册地址(中文) 表单含 cascader(省市区) + textarea(详细地址)
-    // AI 提取的"住所"是完整地址，需要拆分成两段分别填入。
-    const regAddrSplit = splitAddressIntoRegionAndDetail(get("公司/个体经营注册地址(中文)"));
-
-    // ============== 法人代表信息（来自 lastModulesData["法人代表信息"] + lastValidationResult + lastAiData） ==============
-    const repModule = (lastModulesData || []).find((m) => m.title === "法人代表信息");
-    const repFields = repModule?.fields || [];
-    const getRep = (key) => (repFields.find((f) => f.key === key)?.value || "").trim();
-
-    const idFront = lastValidationResult?.found?.find((f) => f.label === "身份证正面");
-    const idBack = lastValidationResult?.found?.find((f) => f.label === "身份证反面");
-    const idFrontPayload = await fileToPayload(idFront);
-    const idBackPayload = await fileToPayload(idBack);
-
-    // 拼音姓 / 拼音名：优先用 AI 直接给的两段，缺失时按"首字母大写音节"拆分（仅保 1+rest 拆分，复姓识别交给 AI）
-    const aiFront = lastAiData.idCardFront || {};
-    const fullPinyin = (aiFront.拼音名 || "").trim();
-    let surnamePinyin = (aiFront.姓拼音 || "").trim();
-    let givenNamePinyin = (aiFront.名拼音 || "").trim();
-    if ((!surnamePinyin || !givenNamePinyin) && fullPinyin) {
-      const syllables = fullPinyin.match(/[A-Z][a-z]+/g) || [];
-      if (syllables.length >= 2) {
-        if (!surnamePinyin) surnamePinyin = syllables[0];
-        if (!givenNamePinyin) givenNamePinyin = syllables.slice(1).join("");
-      } else if (syllables.length === 1 && !surnamePinyin) {
-        surnamePinyin = syllables[0];
-      }
-    }
-
-    // 法人/个人代表身份证地址：cascader(省市区) + textarea(详细)，与公司注册地址结构一致
-    const idAddrSplit = splitAddressIntoRegionAndDetail(getRep("法人/个人代表身份证地址"));
-
-    // ============== 店铺信息（来自 lastModulesData["店铺信息"]） ==============
-    const shopModule = (lastModulesData || []).find((m) => m.title === "店铺信息");
-    const shopFields = shopModule?.fields || [];
-    const getShop = (key) => (shopFields.find((f) => f.key === key)?.value || "").trim();
-
-    /** @type {Array<object>} */
-    const plan = [
-      // ============================ 公司信息 ============================
-      // --- 文本字段 ---
-      { type: "text", key: "公司名称", placeholder: "请输入公司名称", value: get("公司名称") },
-      { type: "text", key: "营业执照号码/注册号", placeholder: "请输入营业执照号码/注册号", value: get("营业执照号码/注册号") },
-      // 注册资本去掉末尾的"元"（页面输入框只接受纯数字/金额）
-      { type: "text", key: "注册资本", placeholder: "请输入注册资本", value: get("注册资本").replace(/元\s*$/u, "") },
-      { type: "text", key: "登记机关所在地税务局名称", placeholder: "请输入登记机关所在地税务局名称", value: get("登记机关所在地税务局名称") },
-      { type: "text", key: "登记机关所在地法院名称", placeholder: "请输入登记机关所在地法院名称", value: get("登记机关所在地法院名称") },
-      // 邮编：页面 placeholder 是"请输入邮政编码"
-      { type: "text", key: "邮编", placeholder: "请输入邮政编码", value: get("邮编") },
-      // 注册地址详细（textarea）：xpath 用户提供的绝对路径（最精确），失败时回退到表单项标签查找。
-      {
-        type: "text",
-        key: "公司/个体经营注册地址(中文)-详细",
-        xpath: "/html/body/div[2]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[1]/div/div[3]/div/div[1]/div[1]/div[1]/form[3]/div/div/div[9]/div/div/div/div/div/div/div/span/div[2]/div/div/textarea",
-        labelText: "公司/个体经营注册地址(中文)",
-        elementSelector: "textarea",
-        value: regAddrSplit.detail,
+    return await brick.buildPlan({
+      modulesData: lastModulesData,
+      foundFiles: lastValidationResult?.found || [],
+      aiData: lastAiData,
+      utils: {
+        splitAddressIntoRegionAndDetail,
+        imageFileToPdfBlob,
+        buildSinglePagePdfFromJpeg,
+        fileToBase64Plain,
       },
-
-      // --- 文件上传（field-id 来自用户提供的 HTML，labelFallback 保证 id 变化时仍可定位） ---
-      { type: "fileById", key: "营业执照", fieldId: "1784866111212429314", labelFallback: "营业执照", file: licensePayload },
-      { type: "fileById", key: "中国税收居民身份证明", fieldId: "1784866111212429317", labelFallback: "中国税收居民身份证明", file: taxPayload },
-
-      // --- 公司类型（ant-select 下拉，按字符相似度自动匹配最接近的页面选项） ---
-      { type: "select", key: "公司类型", placeholder: "请选择公司类型", value: get("公司类型") },
-
-      // --- 日期 ---
-      { type: "datepicker", key: "公司成立日期", placeholder: "请选择公司成立日期", value: get("公司成立日期") },
-
-      // --- 营业期限：长期 toggle 或日期范围（labelText 用于在多个 .btn_warp 区分） ---
-      { type: "businessTerm", key: "营业期限", labelText: "营业期限", value: get("营业期限"), startDate: get("公司成立日期") },
-
-      // --- 级联选择器 ---
-      // 营业执照签发机关 cascader 期望省/市/区。我们传入完整的"登记机关"字符串（含省+市+区前缀）
-      // 让页面侧按子串匹配各级菜单。
-      { type: "cascader", key: "营业执照签发机关", placeholder: "请选择省市区", value: get("营业执照签发机关") },
-      // 税务局地址：页面上是第一个 placeholder="请选择所在省/市/区" 的 cascader，
-      // 但页面新增了"法院地址 / 注册地址"两个同 placeholder 的 cascader 后必须用 labelText 区分。
-      { type: "cascader", key: "登记机关所在地税务局地址", placeholder: "请选择所在省/市/区", labelText: "登记机关所在地税务局地址", value: get("登记机关所在地税务局地址") },
-      { type: "cascader", key: "登记机关所在地法院地址", placeholder: "请选择所在省/市/区", labelText: "登记机关所在地法院地址", value: get("登记机关所在地法院地址") },
-      { type: "cascader", key: "公司/个体经营注册地址(中文)-省市区", placeholder: "请选择所在省/市/区", labelText: "公司/个体经营注册地址(中文)", value: regAddrSplit.region },
-
-      // ============================ 法人代表信息 ============================
-      // 证件类型：默认根据检测到的身份证设为"法人身份证"；护照流程暂未实现
-      { type: "radio", key: "证件类型", value: getRep("上传法人代表证件信息") },
-
-      // 文件上传（field-id 来自用户提供的 HTML；labelFallback 用 "（人像面）" / "（国徽面）" 文本兜底定位）
-      { type: "fileById", key: "法人代表身份证(人像面)", fieldId: "1784866111229206529", labelFallback: "（人像面）", file: idFrontPayload },
-      { type: "fileById", key: "法人代表身份证(国徽面)", fieldId: "1784866111229206531", labelFallback: "（国徽面）", file: idBackPayload },
-
-      // 文本字段
-      { type: "text", key: "法人/个人代表中文名", placeholder: "请输入法人/个人代表中文名", value: getRep("法人/个人代表中文名") },
-      { type: "text", key: "法人/个人代表身份证号", placeholder: "请输入法人/个人代表身份证号", value: getRep("法人/个人代表身份证号") },
-      // 拼音名拆成姓 / 名两段
-      { type: "text", key: "法人拼音-姓", placeholder: "姓，如：Zhang", value: surnamePinyin },
-      { type: "text", key: "法人拼音-名", placeholder: "名，如：San", value: givenNamePinyin },
-      // 身份证地址详细（textarea，省市区之后的部分）
-      { type: "text", key: "法人/个人代表身份证地址-详细", placeholder: "请输入法人身份证上的住址", elementSelector: "textarea", value: idAddrSplit.detail },
-
-      // 出生日期
-      { type: "datepicker", key: "法人/个人代表出生日期", placeholder: "请选择或输入日期（20XX-XX-XX）", value: getRep("法人/个人代表出生日期") },
-
-      // 身份证有效期限（与营业期限同样的 长期 toggle / 日期范围 结构，必须用 labelText 区分）
-      { type: "businessTerm", key: "法人代表身份证有效期限", labelText: "法人代表身份证有效期限", value: getRep("法人代表身份证有效期限") },
-
-      // 身份证地址 省市区（cascader，与"请选择所在省/市/区"重名，用 labelText 区分）
-      { type: "cascader", key: "法人/个人代表身份证地址-省市区", placeholder: "请选择所在省/市/区", labelText: "法人/个人代表身份证地址", value: idAddrSplit.region },
-
-      // 性别（radio：男 / 女）
-      { type: "radio", key: "性别", value: getRep("性别") },
-
-      // 法人国籍（radio：中国籍 / 非中国籍）
-      { type: "radio", key: "法人国籍", value: getRep("法人国籍") },
-
-      // 身份证邮政编码（放在法人信息模块最后填写）：根据 AI 提取的住址里的市/区查表得到的 6 位邮编。
-      // 该 placeholder 与 公司邮编 重名，必须用 labelText="法人/个人代表身份证地址" 把搜索范围
-      // 限定在身份证地址所在的 form-item 子树内，避免回填到 公司邮编 输入框。
-      // afterPopup:true —— 必须等 身份证地址 cascader（Phase 2）选完再填，否则 cascader 的
-      // change 事件会把同 form-item 内的邮编输入框清空。
-      {
-        type: "text",
-        key: "法人/个人代表身份证邮编",
-        labelText: "法人/个人代表身份证地址",
-        elementSelector: 'input[placeholder="请输入邮政编码"]',
-        placeholder: "请输入邮政编码",
-        value: getRep("法人/个人代表身份证邮编"),
-        afterPopup: true,
-      },
-
-      // ============================ 店铺信息 ============================
-      // 销售平台：ant-radio-button-wrapper 形式（速卖通 / 亚马逊 / 其他），值由店铺链接自动推断
-      { type: "radio", key: "销售平台", value: getShop("销售平台") },
-
-      // 文本字段
-      { type: "text", key: "店铺链接", placeholder: "请输入店铺链接", value: getShop("店铺链接") },
-      { type: "text", key: "公司英文名称", placeholder: "请务必填写您亚马逊后台/电商平台后台的公司英文名称", value: getShop("公司英文名称") },
-      { type: "text", key: "公司/个体经营注册地址(英文)", placeholder: "请输入与亚马逊后台一致的经营注册地址", value: getShop("公司/个体经营注册地址（英文）") },
-      { type: "text", key: "联系邮箱", placeholder: "请输入公司联系人邮箱", value: getShop("联系邮箱") },
-
-      // 经营范围：ant-select 多选，默认值 "电子商品 electrical products"（下拉第一项）
-      {
-        type: "select",
-        key: "公司（个人）店铺主要经营范围",
-        placeholder: "请选择公司（个人）店铺主要经营范围",
-        value: getShop("公司（个人）店铺主要经营范围"),
-      },
-
-      // 店铺后台截图：要求 JPG/JPEG/PNG 直接上传（不转 PDF）。fieldId 待补，
-      // 当前用 labelFallback 兜底，handleFile 会通过附近文本节点定位上传框。
-      // 若 lastValidationResult 中没有该项（用户未点击"生成临时占位"且未自行上传），file 为 null，
-      // handleFile 会以 "无文件，跳过" 优雅跳过。
-      { type: "fileById", key: "店铺后台截图", labelFallback: "店铺后台截图", file: shopScreenshotPayload },
-    ];
-
-    return plan;
+    });
   }
 
   async function runAutofill() {
@@ -3304,7 +3313,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // (e.g., extracting structured fields from a business license).
     const tryMatch = (file, aiLabel, idx, pageInfo = "", imageData = null, mimeType = null) => {
       if (!aiLabel) return false;
-      const matchedReq = regConfig.files.find(req => req.label === aiLabel && !found.some(f => f.label === req.label));
+      const matchedReq = regConfig.files.find(req => req.label === aiLabel && !found.some(f => f.key === req.key));
       if (matchedReq) {
         found.push({
           ...matchedReq,
@@ -3372,6 +3381,20 @@ document.addEventListener("DOMContentLoaded", async () => {
                   const t0 = Date.now();
                   const aiLabel = await detectWithAI("page.jpg", pages[p]);
                   statusLog(`[AI] ${file.name}${pageLabel ? " " + pageLabel : ""} → ${aiLabel || "未识别"}（${Date.now() - t0}ms）`);
+                  // 公司章程：通常是几页的长 PDF，命中后立即停止后续页扫描（节省 AI 调用）；
+                  // 路径不带 "(第N页)" 后缀 —— 整份 PDF 都是章程内容，上传时也要传整份原文件（fileToPayload
+                  // 走 imageFileToPdfBlob 的 PDF no-op 分支），所以不能用单页提取的逻辑。
+                  // 防御：仅在当前组合配置了 "公司章程" 需求项（tryMatch 真的命中）时才 break；
+                  // 否则继续扫后续页 —— 否则像波兰这种没有 公司章程 需求的组合，AI 偶发误报会
+                  // 把多页 PDF（如 身份证正反面）的剩余页全部跳过，造成漏识别。
+                  if (aiLabel === "公司章程") {
+                    if (tryMatch(file, aiLabel, i, "", pages[p], "image/jpeg")) {
+                      anyMatched = true;
+                      statusLog(`[AI] ${file.name} 命中公司章程，跳过剩余 ${pages.length - p - 1} 页`);
+                      break;
+                    }
+                    // 当前组合无 公司章程 需求项 → 不 break，继续扫后续页
+                  }
                   const pageSuffix = isMultiPage ? ` (第${p + 1}页)` : "";
                   if (tryMatch(file, aiLabel, i, pageSuffix, pages[p], "image/jpeg")) {
                     anyMatched = true;
@@ -3399,7 +3422,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Filename matching ONLY for non-image/non-PDF formats (e.g., xlsx)
     // Images and PDFs MUST be identified by AI content, never by filename
     for (const fileReq of regConfig.files) {
-      if (found.some(f => f.label === fileReq.label)) {
+      if (found.some(f => f.key === fileReq.key)) {
         continue;
       }
 
@@ -3410,10 +3433,25 @@ document.addEventListener("DOMContentLoaded", async () => {
         const ext = getFileExtension(f.name);
         // Skip image/PDF files - they must use AI only
         if (isImageFile(f.name) || ext === ".pdf") continue;
-        if (matchesFileRequirement(f.name, fileReq)) {
-          matchedIdx = i;
-          break;
+        if (!matchesFileRequirement(f.name, fileReq)) continue;
+        // 额外内容校验：若 fileReq.xlsxA1Contains 配置了字符串，xlsx 第一个 sheet 的 A1 单元格
+        // 必须包含该字符串才算命中。用于区分相同后缀的多份 xlsx（例如把别人发来的另一份 .xlsx
+        // 误当成"基础信息表"）。任一环节异常都视为不匹配，让该文件继续在下一个 fileReq 候选中考虑。
+        if (fileReq.xlsxA1Contains && ext === ".xlsx" && f.file instanceof File) {
+          try {
+            const sheet = await loadXlsxSheet(f.file);
+            const a1 = getXlsxCell(sheet, "A1");
+            if (!a1.includes(fileReq.xlsxA1Contains)) {
+              statusLog(`[文件名] ${f.name} 跳过：A1="${a1.slice(0, 40)}" 不含"${fileReq.xlsxA1Contains}"`);
+              continue;
+            }
+          } catch (e) {
+            statusLog(`[文件名] ${f.name} 跳过：A1 读取失败 ${e.message}`);
+            continue;
+          }
         }
+        matchedIdx = i;
+        break;
       }
 
       if (matchedIdx >= 0) {
@@ -3477,25 +3515,25 @@ document.addEventListener("DOMContentLoaded", async () => {
     missing.forEach(item => {
       const el = document.createElement("div");
       el.className = "missing-item";
-      const canPlaceholder = !!getPlaceholderConfig(item.label);
+      const canPlaceholder = !!getPlaceholderConfig(item.key);
       el.innerHTML = `
         <span class="missing-icon">✗</span>
         <span class="missing-label">缺少${escapeHtml(item.label)}</span>
         ${item.required ? '<span class="missing-badge">必填</span>' : '<span class="missing-badge missing-optional">选填</span>'}
-        ${canPlaceholder ? `<button type="button" class="placeholder-btn" data-label="${escapeHtml(item.label)}" title="生成空白占位文件，避免必填卡住流程">📎 生成临时占位</button>` : ''}
+        ${canPlaceholder ? `<button type="button" class="placeholder-btn" data-key="${escapeHtml(item.key)}" title="生成空白占位文件，避免必填卡住流程">📎 生成临时占位</button>` : ''}
       `;
       container.appendChild(el);
     });
 
     container.querySelectorAll(".placeholder-btn").forEach(btn => {
       btn.addEventListener("click", async () => {
-        const label = btn.dataset.label;
+        const key = btn.dataset.key;
         btn.disabled = true;
         btn.textContent = "⏳ 生成中...";
         try {
-          await applyPlaceholder(label);
+          await applyPlaceholder(key);
         } catch (e) {
-          statusLog(`[占位] ${label} 生成失败: ${e.message}`);
+          statusLog(`[占位] ${key} 生成失败: ${e.message}`);
           btn.disabled = false;
           btn.textContent = "📎 生成临时占位";
         }
@@ -3552,6 +3590,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // --- Init: load config, then restore state ---
   await loadConfig();
+  // 加载配置后立即校验每个组合引用的积木是否已注册，不通过也不阻断启动
+  // 只在控制台 console.error，让开发期及时发现 autofillModule 拼写错误 / 漏注册。
+  validateConfigBricks();
   // 紧接着从 chrome.storage.local 加载 apiKey；loadConfig 必须先跑完，
   // 因为 loadApiKey 内做了一次性迁移：若 storage 里没有但 JSON legacy 字段有，则复制过来
   await loadApiKey();
