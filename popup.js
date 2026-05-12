@@ -687,6 +687,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 签名面板：绑定输入框 / 重新生成 / 注入按钮（仅绑定一次，避免重复事件）
   setupSignaturePanel();
 
+  // 委托书圆章面板：绑定输入控件 + 生成 / 下载 / 重置按钮（仅绑定一次）
+  setupPoaSealPanel();
+
   // 顶部 tabs（主功能 / 配置）
   // 注意：配置 tab 的 API Key 表单 setupConfigForm() 必须放到 await loadApiKey() 之后，
   // 否则它会在 apiKey 还是空字符串时就把 input.value 填成 ""，
@@ -752,6 +755,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     "内蒙古自治区", "广西壮族自治区", "西藏自治区", "宁夏回族自治区", "新疆维吾尔自治区",
     "香港特别行政区", "澳门特别行政区"
   ];
+
+  // 不设区地级市：这 5 个地级市直辖镇/街道，没有 区/县 级行政区，因此 antd
+  // cascader 在选完省+市之后第 3 级直接列出 镇/街道。splitAddressIntoRegionAndDetail
+  // 对这些 city 需要把后续的 "XX镇 / XX街道" 抠出来作为 district，否则 cascader
+  // 无法点到 leaf，antd 永远不会 commit 值。
+  const PREFECTURES_WITHOUT_DISTRICTS = ["东莞市", "中山市", "嘉峪关市", "三沙市", "儋州市"];
 
   // 根据中文地址查询邮政编码：优先按区/县命中，其次按地级市，最后按省兜底。
   // 数据来自 libs/postal-codes.js (window.CHINA_POSTAL_CODES)。
@@ -870,6 +879,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (city && !district && parents[city]) {
       district = city;
       city = parents[city];
+    }
+    // 不设区地级市处理：东莞市 / 中山市 / 嘉峪关市 / 三沙市 / 儋州市 这 5 个地级市下
+    // 没有 区/县，cascader 第 3 级直接是 镇/街道。若地址形如"广东省东莞市虎门镇..."
+    // 时 district 仍为空，导致 region 只有省+市两级，handleCascader 选不到 leaf →
+    // antd 永远不会 commit 值（日志看上去"已选广东省/东莞市"实则没写入）。
+    // 此处把后续的"XX镇 / XX街道"抠出来作为 district（cascader level-2）。
+    // 注意 1：刻意不把"乡"加进后缀，避免"三乡镇"被贪婪地切成"三乡"。
+    // 注意 2：把"镇镇"放在"镇"之前，避免中山市的"古镇镇"被切成"古镇"（漏掉第二个镇）；
+    //         regex alternation 是左到右优先匹配。
+    if (city && !district && PREFECTURES_WITHOUT_DISTRICTS.includes(city)) {
+      const townshipMatch = rest.match(/^([^省市区县旗]{1,10}?(?:街道|镇镇|镇))/);
+      if (townshipMatch) {
+        district = townshipMatch[1];
+        rest = rest.slice(district.length);
+      }
     }
     // 省缺失时反查：身份证/营业执照地址常省略省份（如"广州市白云区..."），
     // cascader 第 1 级必须是省，否则会抛 `cascader 第 1 级匹配不到`。
@@ -1290,6 +1314,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       // 模块构建完成（包含 AI 提取的"法人/个人代表拼音名（英文名）"），
       // 刷新签名面板默认值（用户已手动编辑过的话不会被覆盖）
       showSignaturePanel().catch((e) => console.warn("[signature] refresh err:", e));
+      // 同步刷新 委托书圆章 面板 —— 此时 公司名 已从 xlsx 读出，可作为默认值回填
+      showPoaSealPanel().catch((e) => console.warn("[poa-seal] refresh err:", e));
     } catch (e) {
       statusLog(`[模块] 构建失败: ${e.message}`);
       lastModulesData = null;
@@ -1335,6 +1361,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // 同步显示签名面板，并用 AI 提取的法人拼音作为默认值（不阻塞主流程）
     showSignaturePanel().catch((e) => console.warn("[signature] showPanel err:", e));
+    // 同步显示 委托书圆章 面板（仅 placeholders.power_of_attorney.kind=poa_with_seal 组合）
+    showPoaSealPanel().catch((e) => console.warn("[poa-seal] showPanel err:", e));
   }
 
   // ---- Autofill: push the detected 营业执照 file into the active tab's upload input ----
@@ -1497,34 +1525,88 @@ document.addEventListener("DOMContentLoaded", async () => {
     return new File([pdfBytes], filename, { type: "application/pdf" });
   }
 
-  async function generatePlaceholderFile(key) {
-    const cfg = getPlaceholderConfig(key);
-    if (!cfg) throw new Error(`未配置占位生成: ${key}`);
+  // 从 lastModulesData 按 { module, field } 取值（用于 poa_with_seal 取公司中文名）。
+  // 找不到时返回空串；调用方决定是否兜底报错。
+  function readModuleField(moduleTitle, fieldKey) {
+    if (!Array.isArray(lastModulesData)) return "";
+    const mod = lastModulesData.find((m) => m.title === moduleTitle);
+    if (!mod || !Array.isArray(mod.fields)) return "";
+    const f = mod.fields.find((x) => x.key === fieldKey);
+    return (f && f.value || "").toString().trim();
+  }
+
+  // 法国|大陆 委托书：用模板 PDF + Canvas 生成的圆章合成最终文件。
+  // 依赖 window.PoaComposer（annex/poa_composer.js）+ window.SealGenerator + window.PDFLib。
+  // 公司名优先级：cfg.companyName（poa-seal-area 面板传入）> cfg.companyNameFrom 指向的 lastModulesData 字段。
+  async function createPoaWithSealFile(cfg) {
+    if (!window.PoaComposer) throw new Error("PoaComposer 未加载（annex/poa_composer.js）");
+    let companyName = (cfg.companyName || "").trim();
+    if (!companyName) {
+      const src = cfg.companyNameFrom || { module: "公司信息", field: "公司名称" };
+      companyName = readModuleField(src.module, src.field);
+      if (!companyName) {
+        throw new Error(`委托书盖章: 未从「${src.module} → ${src.field}」取到公司名，请在 🔴 委托书圆章 面板手动输入，或确认 公司信息 模块已构建`);
+      }
+    }
+    const { file } = await window.PoaComposer.compose(companyName, {
+      filename: cfg.filename || "委托书盖章_自动生成.pdf",
+      sealBox: cfg.sealBox,        // 红框坐标
+      sealOpts: cfg.sealOpts,      // 章样式
+    });
+    return file;
+  }
+
+  // overrides 可以覆盖 placeholder 配置里的任意字段（如 companyName / sealBox / sealOpts），
+  // 用于 poa-seal-area 面板把用户实时调整的参数透传给生成器。
+  async function generatePlaceholderFile(key, overrides) {
+    const baseCfg = getPlaceholderConfig(key);
+    if (!baseCfg) throw new Error(`未配置占位生成: ${key}`);
+    const cfg = Object.assign({}, baseCfg, overrides || {});
     if (cfg.kind === "pdf") return createBlankPdfFile(cfg.filename, cfg.text);
     if (cfg.kind === "png") return createBlankPngFile(cfg.filename, cfg.text);
+    if (cfg.kind === "poa_with_seal") return createPoaWithSealFile(cfg);
     throw new Error(`未知占位类型: ${cfg.kind}`);
   }
 
   // 在缺失项上生成临时占位文件，并把它"塞回" uploadedFiles 与 lastValidationResult，
   // 让后续渲染、模块构建、一键注入都能像识别成功一样使用它。
-  async function applyPlaceholder(key) {
+  //
+  // @param {string} key
+  // @param {object} [options]
+  // @param {boolean} [options.force] true 时若已存在则先移除旧文件再重新生成（poa-seal 面板用）
+  // @param {object}  [options.overrides] 透传给 generatePlaceholderFile，覆盖 placeholder 配置
+  //                                      （poa_with_seal 时可传 companyName/sealBox/sealOpts）
+  async function applyPlaceholder(key, options) {
+    options = options || {};
     if (!lastValidationResult) {
       statusLog(`[占位] 请先完成检查再生成 ${key}`);
-      return;
+      return null;
     }
-    if (lastValidationResult.found.some(f => f.key === key)) {
-      statusLog(`[占位] ${key} 已存在，跳过`);
-      return;
+
+    const existingIdx = lastValidationResult.found.findIndex(f => f.key === key);
+    if (existingIdx !== -1) {
+      if (!options.force) {
+        statusLog(`[占位] ${key} 已存在，跳过`);
+        return null;
+      }
+      // force=true：移除旧记录 + 对应 uploadedFiles 项
+      const oldFound = lastValidationResult.found[existingIdx];
+      const oldName = oldFound?.file?.name;
+      lastValidationResult.found.splice(existingIdx, 1);
+      uploadedFiles = uploadedFiles.filter(f =>
+        !(f.placeholder && (f === oldFound?.file || (oldName && f.name === oldName)))
+      );
+      delete placeholderState[key];
     }
 
     const req = (currentReqConfig?.files || []).find(r => r.key === key);
     if (!req) {
       statusLog(`[占位] 未在配置里找到 key=${key}`);
-      return;
+      return null;
     }
     const displayLabel = req.label || key;
 
-    const file = await generatePlaceholderFile(key);
+    const file = await generatePlaceholderFile(key, options.overrides);
     placeholderState[key] = file;
 
     const fileMeta = {
@@ -1551,6 +1633,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderResultSummary(lastValidationResult);
     renderAutofillButton(lastValidationResult);
     refreshFilePathModuleFields();
+
+    return file;
   }
 
   // 根据当前 lastValidationResult.found，仅刷新 file_path 类型的模块字段值并重渲。
@@ -2458,6 +2542,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     const stats = { delete: 0, cascader: 0, date: 0, select: 0, switch: 0, input: 0, textarea: 0 };
     const log = [];
 
+    // 0. 「重新签名」链接 + 弹窗「确定」—— 让服务端重置签名/审核状态，
+    //    再开始清空表单字段。这一步只在已签过名/已提交过的页面才会出现这个链接，
+    //    没有时静默跳过。
+    //    后端流程（参考 user.axisacct.com.har）：
+    //      点 确定 → GET integrationByApplyId?applyId=...&reSign=1 → 返回新的 signObj.key
+    //      → 页面重新渲染签名块，否则旧签名会一直残留导致一键填充后状态错乱。
+    //    DOM 结构：
+    //      <a class="ost-link-line ost-text-font14">重新签名</a>
+    //      <button class="ant-btn ant-btn-primary"><span>确 定</span></button>  (antd 弹窗)
+    const resignLink = Array.from(document.querySelectorAll(".ost-link-line"))
+      .find((el) => el.textContent.trim() === "重新签名" && isVisible(el));
+    if (resignLink) {
+      try {
+        resignLink.click();
+        stats.resignClicked = 1;
+        log.push(`已点击「重新签名」链接`);
+        await sleep(350); // 等 antd modal 入场动画 (200~300ms)
+
+        // antd 3.x Modal.confirm 渲染为 .ant-modal-content > .ant-modal-confirm-body-wrapper
+        // 用 .ant-modal-content 同时覆盖普通 Modal 和 Modal.confirm，取最近渲染（最后一个）的
+        const modals = Array.from(document.querySelectorAll(".ant-modal-content"))
+          .filter(isVisible);
+        const modal = modals[modals.length - 1];
+        if (modal) {
+          // 按钮文本是 "确 定"（中间有空格），去掉所有空白再比较
+          const confirmBtn = Array.from(modal.querySelectorAll(".ant-btn-primary"))
+            .find((el) => isVisible(el)
+              && (el.textContent || "").replace(/\s+/g, "") === "确定");
+          if (confirmBtn) {
+            confirmBtn.click();
+            stats.resignConfirmed = 1;
+            log.push(`已点击「重新签名」弹窗「确定」`);
+            // 等 modal 关闭（轮询 isVisible，最长 2s 兜底）
+            const waitStart = Date.now();
+            while (Date.now() - waitStart < 2000) {
+              const stillVisible = Array.from(document.querySelectorAll(".ant-modal-content"))
+                .some(isVisible);
+              if (!stillVisible) break;
+              await sleep(80);
+            }
+            // 再给 Vue 一点重渲染时间（页面会拉新的 integrationByApplyId 并刷新签名节点）
+            await sleep(300);
+          } else {
+            log.push(`⚠️「重新签名」弹窗里未找到「确定」按钮，已跳过`);
+          }
+        } else {
+          log.push(`⚠️ 点击「重新签名」后未检测到弹窗，已跳过「确定」步骤`);
+        }
+      } catch (e) {
+        log.push(`⚠️「重新签名」流程异常：${e && e.message || e}`);
+      }
+    }
+
     // 1. 文件上传"删除"链接 —— 必须最先点，否则部分 form-item 还处于已上传只读态
     const delLinks = Array.from(document.querySelectorAll("span.text-primary.ost-link-line"))
       .filter((el) => el.textContent.trim() === "删除" && isVisible(el));
@@ -2749,8 +2886,9 @@ document.addEventListener("DOMContentLoaded", async () => {
           const s = clearRet.stats;
           const totalCleared = (s.delete || 0) + (s.cascader || 0) + (s.date || 0) + (s.select || 0)
             + (s.switch || 0) + (s.input || 0) + (s.textarea || 0) + (s.longTerm || 0);
+          const resignNote = s.resignConfirmed ? "（含重新签名）" : s.resignClicked ? "（已点重新签名）" : "";
           console.log("[autofill] 清空完成:", clearRet);
-          setStatus(`⏳ 已清空 ${totalCleared} 项，等待页面稳定...`);
+          setStatus(`⏳ 已清空 ${totalCleared} 项${resignNote}，等待页面稳定...`);
         }
       } catch (e) {
         console.warn("[autofill] 清空阶段异常（继续填充）:", e);
@@ -2841,17 +2979,299 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const { stats, log } = ret;
       const total = stats.delete + stats.cascader + stats.date + stats.select + stats.switch + stats.input + stats.textarea;
+      // resign 动作不计入 total（它不是「清空字段」），但在 head 末尾附一句说明，
+      // 避免「未发现可清空的字段」误导用户以为什么都没发生。
+      const resignNote = stats.resignConfirmed ? "，已重新签名" : stats.resignClicked ? "，已点重新签名但未确认" : "";
       const head = total === 0
-        ? "完成：页面未发现可清空的字段"
-        : `完成：共操作 ${total} 项（删除${stats.delete} / cascader${stats.cascader} / 日期${stats.date} / select${stats.select} / 开关${stats.switch} / input${stats.input} / textarea${stats.textarea}）`;
+        ? `完成：页面未发现可清空的字段${resignNote}`
+        : `完成：共操作 ${total} 项（删除${stats.delete} / cascader${stats.cascader} / 日期${stats.date} / select${stats.select} / 开关${stats.switch} / input${stats.input} / textarea${stats.textarea}）${resignNote}`;
       const body = (log || []).join("\n");
-      setStatus(body ? head + "\n" + body : head, total > 0 ? "ok" : "info");
+      const okFlag = total > 0 || !!stats.resignConfirmed;
+      setStatus(body ? head + "\n" + body : head, okFlag ? "ok" : "info");
     } catch (e) {
       console.error(e);
       setStatus(`❌ 异常：${e?.message || e}`, "error");
     } finally {
       btn.disabled = false;
     }
+  }
+
+  // ============================================================================
+  // 委托书圆章面板（仅 placeholders.power_of_attorney.kind=poa_with_seal 的组合显示）
+  // - 公司中文名输入框：默认从 公司信息 → 公司名称 字段取，可手动覆盖
+  // - 实时章预览（debounced）
+  // - 高级参数：章直径 / 红框中心 X-Y / 颜色 / 外圈粗细 / 文字半径比 / 五角星比例 /
+  //             弧线跨度 / 字号 / 字体（0 / 自适应 = 用 SealGenerator 内置默认）
+  // - 点 「🖨️ 生成委托书 PDF」会把 PDF 用 applyPlaceholder(force=true) 塞回
+  //   uploadedFiles + lastValidationResult.found，与「📎 生成临时占位」走同一通道。
+  // 全部本地完成，无任何网络依赖；用户分发后即开即用。
+  // ============================================================================
+
+  // 最近一次成功生成的章 PNG Blob（供「⬇️ 下载章 PNG」复用，避免重复渲染）
+  let lastPoaSealBlob = null;
+  // 输入框 debounce 句柄
+  let poaSealInputTimer = null;
+
+  // 读取当前面板上的全部参数 —— 章颜色、字号、弧线跨度的 "自适应" 用 0 表示。
+  function readPoaSealParams() {
+    const $ = (id) => document.getElementById(id);
+    const num = (id) => parseFloat($(id).value);
+    const arcDeg = num("poa-seal-arc");
+    const fontSize = num("poa-seal-fontsize");
+    return {
+      companyName: ($("poa-seal-company").value || "").trim(),
+      sealBox: {
+        centerX: num("poa-seal-cx"),
+        centerY: num("poa-seal-cy"),
+        diameter: num("poa-seal-diameter"),
+      },
+      sealOpts: {
+        size: 600,                              // PNG 像素分辨率（嵌入 PDF 时按 diameter 缩放）
+        color: $("poa-seal-color").value,
+        ringWidth: num("poa-seal-ring"),
+        textRadiusRatio: num("poa-seal-trr"),
+        starRatio: num("poa-seal-star"),
+        arcSpan: arcDeg ? (arcDeg * Math.PI / 180) : 0,
+        fontSize: fontSize || 0,
+        font: $("poa-seal-font").value,
+        fontBold: true,
+      },
+    };
+  }
+
+  // 把 cfg.sealBox / cfg.sealOpts（来自 requirements.json）覆盖到面板默认值上。
+  // 缺失字段保持面板初始值（也就是 SEAL_BOX_DEFAULT 同步过来的预设）。
+  function applyPoaSealConfigToPanel(cfg) {
+    const $ = (id) => document.getElementById(id);
+    const setRange = (id, valId, v, fmt) => {
+      if (v === undefined || v === null) return;
+      $(id).value = v;
+      if (valId) $(valId).textContent = fmt ? fmt(v) : v;
+    };
+    const box = (cfg && cfg.sealBox) || {};
+    if (box.centerX !== undefined) setRange("poa-seal-cx", "poa-seal-cx-val", box.centerX);
+    if (box.centerY !== undefined) setRange("poa-seal-cy", "poa-seal-cy-val", box.centerY);
+    if (box.diameter !== undefined) setRange("poa-seal-diameter", "poa-seal-diameter-val", box.diameter);
+
+    const opts = (cfg && cfg.sealOpts) || {};
+    if (opts.color !== undefined) { $("poa-seal-color").value = opts.color; $("poa-seal-color-val").textContent = opts.color; }
+    if (opts.ringWidth !== undefined) setRange("poa-seal-ring", "poa-seal-ring-val", opts.ringWidth);
+    if (opts.textRadiusRatio !== undefined) setRange("poa-seal-trr", "poa-seal-trr-val", opts.textRadiusRatio);
+    if (opts.starRatio !== undefined) setRange("poa-seal-star", "poa-seal-star-val", opts.starRatio);
+    if (opts.arcSpan !== undefined) {
+      const deg = Math.round(opts.arcSpan * 180 / Math.PI);
+      setRange("poa-seal-arc", "poa-seal-arc-val", deg, (v) => v == 0 ? "自适应" : v + "°");
+    }
+    if (opts.fontSize !== undefined) {
+      setRange("poa-seal-fontsize", "poa-seal-fontsize-val", opts.fontSize, (v) => v == 0 ? "自适应" : v + "px");
+    }
+    if (opts.font !== undefined) {
+      const sel = $("poa-seal-font");
+      // 若选项里不存在，则不动；让用户感知字体回退
+      for (const o of sel.options) if (o.value === opts.font) { sel.value = opts.font; break; }
+    }
+  }
+
+  // 实时渲染章 PNG 到预览 canvas（公司名为空时不画，提示用户输入）
+  async function renderPoaSealPreview() {
+    const info = document.getElementById("poa-seal-info");
+    const previewCanvas = document.getElementById("poa-seal-canvas");
+    if (!window.SealGenerator || !previewCanvas) {
+      if (info) { info.textContent = "章生成模块未加载（annex/seal_generator.js）"; info.style.color = "#dc2626"; }
+      return;
+    }
+    const params = readPoaSealParams();
+    const pctx = previewCanvas.getContext("2d");
+    pctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    if (!params.companyName) {
+      info.textContent = "请输入公司中文名";
+      info.style.color = "#94a3b8";
+      lastPoaSealBlob = null;
+      return;
+    }
+    try {
+      const { canvas } = window.SealGenerator.generate(params.companyName, params.sealOpts);
+      // 缩放到预览 canvas 大小
+      pctx.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height);
+      lastPoaSealBlob = await new Promise((res) => canvas.toBlob((b) => res(b), "image/png"));
+      const sizeKb = lastPoaSealBlob ? (lastPoaSealBlob.size / 1024).toFixed(1) : "?";
+      info.textContent = `${params.companyName} · 输出 ${params.sealOpts.size}px · ${sizeKb}KB · 嵌入直径 ${params.sealBox.diameter}pt (≈ ${(params.sealBox.diameter / 72 * 25.4).toFixed(1)}mm)`;
+      info.style.color = "";
+    } catch (e) {
+      info.textContent = "章渲染失败: " + (e.message || e);
+      info.style.color = "#dc2626";
+      console.error("[poa-seal] render failed:", e);
+    }
+  }
+
+  // 点击「生成委托书 PDF」：合成 PDF + 通过 applyPlaceholder 塞回 uploadedFiles，
+  // 让后续 一键注入 拿到的就是带章的真实委托书。
+  async function runGeneratePoaPdf() {
+    const btn = document.getElementById("poa-seal-generate");
+    const status = document.getElementById("poa-seal-status");
+    const frame = document.getElementById("poa-seal-pdf-frame");
+    if (!btn || !status) return;
+
+    if (!lastValidationResult) {
+      status.textContent = "请先点 「🔍 开始检查」 完成检查，再生成委托书";
+      status.style.color = "#dc2626";
+      return;
+    }
+
+    const params = readPoaSealParams();
+    if (!params.companyName) {
+      status.textContent = "请先填写公司中文名";
+      status.style.color = "#dc2626";
+      return;
+    }
+
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = "⏳ 生成中...";
+    status.textContent = "正在合成委托书 PDF...";
+    status.style.color = "#475569";
+
+    try {
+      const file = await applyPlaceholder("power_of_attorney", {
+        force: true,
+        overrides: {
+          companyName: params.companyName,
+          sealBox: params.sealBox,
+          sealOpts: params.sealOpts,
+        },
+      });
+      if (!file) throw new Error("applyPlaceholder 未返回 File（可能 lastValidationResult 缺失）");
+
+      // 把 PDF blob 显示到 iframe 预览
+      const blob = new Blob([await file.arrayBuffer()], { type: "application/pdf" });
+      if (frame.dataset.objectUrl) URL.revokeObjectURL(frame.dataset.objectUrl);
+      const url = URL.createObjectURL(blob);
+      frame.dataset.objectUrl = url;
+      frame.src = url;
+      frame.style.display = "";
+
+      status.textContent = `✅ 已生成 ${file.name}（${(file.size / 1024).toFixed(1)}KB）— 已塞回上传队列，点 「⚡ 一键注入」 即可上传`;
+      status.style.color = "#15803d";
+    } catch (e) {
+      status.textContent = "❌ 生成失败: " + (e.message || e);
+      status.style.color = "#dc2626";
+      console.error("[poa-seal] generate failed:", e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  }
+
+  // 「⬇️ 下载章 PNG」：把当前预览的 PNG 存到本地
+  function downloadPoaSealPng() {
+    if (!lastPoaSealBlob) return;
+    const params = readPoaSealParams();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(lastPoaSealBlob);
+    a.download = `${params.companyName || "章"}_预览.png`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  // DOMContentLoaded 时调用一次：绑定所有输入控件 + 按钮事件。
+  function setupPoaSealPanel() {
+    const area = document.getElementById("poa-seal-area");
+    if (!area) return;
+
+    const $ = (id) => document.getElementById(id);
+
+    // range / color 值变化 → 更新副标签 + 触发预览刷新（debounce）
+    const bindLive = (inputId, valId, fmt) => {
+      const el = $(inputId);
+      const v = valId ? $(valId) : null;
+      if (!el) return;
+      const upd = () => {
+        if (v) v.textContent = fmt ? fmt(el.value) : el.value;
+        clearTimeout(poaSealInputTimer);
+        poaSealInputTimer = setTimeout(renderPoaSealPreview, 80);
+      };
+      el.addEventListener("input", upd);
+    };
+    bindLive("poa-seal-diameter", "poa-seal-diameter-val");
+    bindLive("poa-seal-cx", "poa-seal-cx-val");
+    bindLive("poa-seal-cy", "poa-seal-cy-val");
+    bindLive("poa-seal-color", "poa-seal-color-val");
+    bindLive("poa-seal-ring", "poa-seal-ring-val");
+    bindLive("poa-seal-trr", "poa-seal-trr-val");
+    bindLive("poa-seal-star", "poa-seal-star-val");
+    bindLive("poa-seal-arc", "poa-seal-arc-val", (v) => v == 0 ? "自适应" : v + "°");
+    bindLive("poa-seal-fontsize", "poa-seal-fontsize-val", (v) => v == 0 ? "自适应" : v + "px");
+    $("poa-seal-font").addEventListener("change", () => {
+      clearTimeout(poaSealInputTimer);
+      poaSealInputTimer = setTimeout(renderPoaSealPreview, 0);
+    });
+
+    // 公司名输入：标记"用户已手动编辑"，避免后续 showPoaSealPanel 二次覆盖
+    $("poa-seal-company").addEventListener("input", (e) => {
+      e.target.dataset.userEdited = "1";
+      clearTimeout(poaSealInputTimer);
+      poaSealInputTimer = setTimeout(renderPoaSealPreview, 200);
+    });
+
+    // 「↺ 恢复默认」按钮：清掉用户调整，按 requirements.json 的 placeholder 配置重置
+    $("poa-seal-reset").addEventListener("click", () => {
+      // 先把 UI 全部回到 HTML 里的 value="..."（即 SEAL_BOX_DEFAULT 同步过来的预设）
+      const defaults = {
+        "poa-seal-diameter": 150, "poa-seal-cx": 408, "poa-seal-cy": 219,
+        "poa-seal-color": "#c62828", "poa-seal-ring": 8, "poa-seal-trr": 0.8,
+        "poa-seal-star": 0.39, "poa-seal-arc": 300, "poa-seal-fontsize": 86,
+      };
+      for (const [id, v] of Object.entries(defaults)) {
+        const el = $(id);
+        if (!el) continue;
+        el.value = v;
+        const valEl = $(id + "-val");
+        if (valEl) {
+          if (id === "poa-seal-arc") valEl.textContent = v == 0 ? "自适应" : v + "°";
+          else if (id === "poa-seal-fontsize") valEl.textContent = v == 0 ? "自适应" : v + "px";
+          else valEl.textContent = v;
+        }
+      }
+      $("poa-seal-font").selectedIndex = 0;
+      // 再用 requirements.json 的 cfg 覆盖（如果配过 sealBox/sealOpts）
+      applyPoaSealConfigToPanel(getPlaceholderConfig("power_of_attorney"));
+      renderPoaSealPreview();
+    });
+
+    $("poa-seal-download-png").addEventListener("click", downloadPoaSealPng);
+    $("poa-seal-generate").addEventListener("click", runGeneratePoaPdf);
+  }
+
+  // 检查完成后调用：仅在当前组合配了 poa_with_seal placeholder 时显示面板，
+  // 并用 lastModulesData 里的公司名作为默认值（用户已手动改过时不覆盖）。
+  // showSignaturePanel 在同一次"开始检查"里会被调到两次，本函数同理。
+  async function showPoaSealPanel() {
+    const area = document.getElementById("poa-seal-area");
+    if (!area) return;
+    const cfg = getPlaceholderConfig("power_of_attorney");
+    if (!cfg || cfg.kind !== "poa_with_seal") {
+      area.style.display = "none";
+      return;
+    }
+    area.style.display = "";
+    // 用 requirements.json 里 cfg 的 sealBox/sealOpts 覆盖面板（如果有）
+    applyPoaSealConfigToPanel(cfg);
+
+    // 公司名：从 lastModulesData 取，仅当用户没改过时回填
+    const companyInput = document.getElementById("poa-seal-company");
+    const src = cfg.companyNameFrom || { module: "公司信息", field: "公司名称" };
+    const company = readModuleField(src.module, src.field);
+    if (company && companyInput.dataset.userEdited !== "1") {
+      companyInput.value = company;
+    }
+
+    // 等字体加载（系统宋体一般直接 ready）
+    try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (_) {}
+    if (window.SealGenerator && window.SealGenerator.preloadFont) {
+      try { await window.SealGenerator.preloadFont(readPoaSealParams().sealOpts); } catch (_) {}
+    }
+    await renderPoaSealPreview();
   }
 
   // ============================================================================
@@ -3515,12 +3935,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     missing.forEach(item => {
       const el = document.createElement("div");
       el.className = "missing-item";
-      const canPlaceholder = !!getPlaceholderConfig(item.key);
+      const placeholderCfg = getPlaceholderConfig(item.key);
+      // 委托书盖章 (kind=poa_with_seal) 不再走"📎 生成临时占位"通道：下方专门的
+      // 「🔴 委托书圆章 + 盖章」面板已经能合成带章 PDF，再放一个生成临时占位按钮反而冗余
+      // 且会让用户拿到一份不带章的空白模板。这里改成纯文字提示，引导用户去面板。
+      const isPoaWithSeal = !!placeholderCfg && placeholderCfg.kind === "poa_with_seal";
+      const canPlaceholder = !!placeholderCfg && !isPoaWithSeal;
       el.innerHTML = `
         <span class="missing-icon">✗</span>
         <span class="missing-label">缺少${escapeHtml(item.label)}</span>
         ${item.required ? '<span class="missing-badge">必填</span>' : '<span class="missing-badge missing-optional">选填</span>'}
         ${canPlaceholder ? `<button type="button" class="placeholder-btn" data-key="${escapeHtml(item.key)}" title="生成空白占位文件，避免必填卡住流程">📎 生成临时占位</button>` : ''}
+        ${isPoaWithSeal ? '<span class="missing-hint">↓ 请在下方「🔴 委托书圆章 + 盖章」面板生成</span>' : ''}
       `;
       container.appendChild(el);
     });
@@ -3561,9 +3987,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (autofillArea) autofillArea.style.display = "none";
     const sigArea = document.getElementById("signature-area");
     if (sigArea) sigArea.style.display = "none";
+    const poaArea = document.getElementById("poa-seal-area");
+    if (poaArea) poaArea.style.display = "none";
     // 新一轮检查：清掉签名输入框的"用户已编辑"标记，让默认值能被新数据覆盖
     const sigInput = document.getElementById("signature-name");
     if (sigInput) delete sigInput.dataset.userEdited;
+    // 同理清掉 委托书圆章 公司名输入框的"用户已编辑"标记
+    const poaCompany = document.getElementById("poa-seal-company");
+    if (poaCompany) delete poaCompany.dataset.userEdited;
+    // 清掉 PDF 预览 iframe 与状态
+    const poaFrame = document.getElementById("poa-seal-pdf-frame");
+    if (poaFrame) { poaFrame.style.display = "none"; if (poaFrame.dataset.objectUrl) { URL.revokeObjectURL(poaFrame.dataset.objectUrl); delete poaFrame.dataset.objectUrl; } poaFrame.src = ""; }
+    const poaStatus = document.getElementById("poa-seal-status");
+    if (poaStatus) poaStatus.textContent = "";
     lastValidationResult = null;
     lastModulesData = null;
   }

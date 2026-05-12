@@ -130,7 +130,7 @@
 
       "placeholders": {
         "shop_backend_screenshot": { "kind": "png", "filename": "店铺后台截图_临时占位.png", "text": "店铺后台截图（临时占位）" },
-        "power_of_attorney":       { "kind": "pdf", "filename": "委托书盖章_临时占位.pdf", "text": "委托书盖章（临时占位）" }
+        "power_of_attorney":       { "kind": "poa_with_seal", "filename": "委托书盖章_自动生成.pdf", "companyNameFrom": { "module": "公司信息", "field": "公司名称" } }
       },
 
       "modules": [

@@ -102,6 +102,77 @@
           <div id="autofill-status" style="margin-top:8px; font-size:12px; color:#475569; white-space:pre-wrap;"></div>
         </div>
 
+        <!-- POA Seal: 委托书圆章预览 + 调参 + 生成（仅 France|China 等 placeholders.power_of_attorney.kind=poa_with_seal 的组合显示） -->
+        <div id="poa-seal-area" style="display:none; margin-top:12px;">
+          <div class="poa-seal-title">🔴 委托书圆章 + 盖章</div>
+          <div class="poa-seal-field">
+            <label for="poa-seal-company">公司中文名（默认从公司信息读取，可编辑）</label>
+            <input type="text" id="poa-seal-company" placeholder="例如：曹县中康网络科技有限公司">
+          </div>
+          <div class="poa-seal-canvas-wrap">
+            <canvas id="poa-seal-canvas" width="240" height="240"></canvas>
+          </div>
+          <div class="poa-seal-info" id="poa-seal-info">—</div>
+
+          <details class="poa-seal-advanced">
+            <summary>⚙️ 高级调整（章样式 + 红框位置）</summary>
+            <div class="poa-seal-grid">
+              <label>章直径 (pt)</label>
+              <input type="range" id="poa-seal-diameter" min="60" max="260" step="2" value="150">
+              <span class="poa-seal-val" id="poa-seal-diameter-val">150</span>
+
+              <label>红框中心 X</label>
+              <input type="range" id="poa-seal-cx" min="0" max="595" step="1" value="408">
+              <span class="poa-seal-val" id="poa-seal-cx-val">408</span>
+
+              <label>红框中心 Y</label>
+              <input type="range" id="poa-seal-cy" min="0" max="842" step="1" value="219">
+              <span class="poa-seal-val" id="poa-seal-cy-val">219</span>
+
+              <label>章颜色</label>
+              <input type="color" id="poa-seal-color" value="#c62828">
+              <span class="poa-seal-val" id="poa-seal-color-val">#c62828</span>
+
+              <label>外圈粗细</label>
+              <input type="range" id="poa-seal-ring" min="2" max="24" step="1" value="8">
+              <span class="poa-seal-val" id="poa-seal-ring-val">8</span>
+
+              <label>文字半径比</label>
+              <input type="range" id="poa-seal-trr" min="0.5" max="0.95" step="0.01" value="0.8">
+              <span class="poa-seal-val" id="poa-seal-trr-val">0.8</span>
+
+              <label>五角星比例</label>
+              <input type="range" id="poa-seal-star" min="0" max="0.45" step="0.01" value="0.39">
+              <span class="poa-seal-val" id="poa-seal-star-val">0.39</span>
+
+              <label>弧线跨度 (°)</label>
+              <input type="range" id="poa-seal-arc" min="0" max="340" step="2" value="300">
+              <span class="poa-seal-val" id="poa-seal-arc-val">300°</span>
+
+              <label>字号 (px)</label>
+              <input type="range" id="poa-seal-fontsize" min="0" max="100" step="1" value="86">
+              <span class="poa-seal-val" id="poa-seal-fontsize-val">86px</span>
+
+              <label>字体</label>
+              <select id="poa-seal-font">
+                <option value='"SimSun","宋体","STSong","NSimSun",serif' selected>宋体（推荐 · 图二）</option>
+                <option value='"SimHei","黑体","STHeiti",sans-serif'>黑体（粗重）</option>
+                <option value='"KaiTi","STKaiti","楷体",serif'>楷体</option>
+                <option value='"FangSong","STFangsong","仿宋",serif'>仿宋</option>
+              </select>
+              <span class="poa-seal-val"></span>
+            </div>
+            <button type="button" class="btn-text" id="poa-seal-reset">↺ 恢复默认参数</button>
+          </details>
+
+          <div class="poa-seal-btn-row">
+            <button class="btn-secondary" id="poa-seal-download-png">⬇️ 下载章 PNG</button>
+            <button class="btn-primary" id="poa-seal-generate">🖨️ 生成委托书 PDF</button>
+          </div>
+          <div id="poa-seal-status" style="margin-top:8px; font-size:12px; color:#475569; white-space:pre-wrap;"></div>
+          <iframe id="poa-seal-pdf-frame" class="poa-seal-pdf-frame" style="display:none;"></iframe>
+        </div>
+
         <!-- Signature: generate 手写签名 + 上传 imgbb + 注入 v27 hook -->
         <div id="signature-area" style="display:none; margin-top:12px;">
           <div class="signature-title">✍️ 注入签名</div>
@@ -156,6 +227,7 @@
   </div>
 
   <script src="libs/pdf.min.js"></script>
+  <script src="libs/pdf-lib.min.js"></script>
   <script src="libs/xlsx.full.min.js"></script>
   <script src="libs/postal-codes.js"></script>
   <!-- 手写签名生成（含云烟体内嵌字体） -->
@@ -163,6 +235,9 @@
   <script src="handwriting/renderer.js"></script>
   <script src="handwriting/styles.js"></script>
   <script src="handwriting/index.js"></script>
+  <!-- 委托书圆章 + PDF 合成（法国|中国大陆 用） -->
+  <script src="annex/seal_generator.js"></script>
+  <script src="annex/poa_composer.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

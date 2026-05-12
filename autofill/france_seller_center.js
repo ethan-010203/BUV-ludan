@@ -243,12 +243,16 @@ export default {
       { type: "text", key: "注册资本", placeholder: "请输入注册资本", value: get("注册资本").replace(/元\s*$/u, "") },
       // 公司邮编：与 法人邮编 共享 placeholder="请输入邮政编码"，用页面 id 绝对定位
       // （maxlength=12，法人那个是 20，仅作识别参考）
+      // afterPopup:true —— 公司邮编 id "0,2,2,0,2" 与 公司注册地址 cascader id "0,2,2,0,0"
+      // 同属 form-item "0,2,2"，cascader 在 Phase 2 的 change 事件会把同 form-item
+      // 内的邮编输入框清空；必须等 cascader 选完才能填，否则白填。
       {
         type: "text",
         key: "邮编",
         elementSelector: '[id="0,2,2,0,2"]',
         placeholder: "请输入邮政编码",
         value: get("邮编"),
+        afterPopup: true,
       },
       // 公司注册地址详细 textarea：页面 placeholder="请输入详细地址"，用 id 精确定位
       // 避免与法人详细地址 textarea (placeholder="请输入法人代表详细地址") 串位。

@@ -146,8 +146,21 @@ export default {
       { type: "text", key: "注册资本", placeholder: "请输入注册资本", value: get("注册资本").replace(/元\s*$/u, "") },
       { type: "text", key: "登记机关所在地税务局名称", placeholder: "请输入登记机关所在地税务局名称", value: get("登记机关所在地税务局名称") },
       { type: "text", key: "登记机关所在地法院名称", placeholder: "请输入登记机关所在地法院名称", value: get("登记机关所在地法院名称") },
-      // 邮编：页面 placeholder 是"请输入邮政编码"
-      { type: "text", key: "邮编", placeholder: "请输入邮政编码", value: get("邮编") },
+      // 公司邮编：与 法人邮编 共享 placeholder="请输入邮政编码"，单纯 placeholder 会命中
+      // 页面上第一个匹配（DOM 顺序里公司邮编在前），所以这里加 labelText="公司/个体经营注册地址(中文)"
+      // 把搜索范围限定在公司注册地址 form-item 子树内，避免和法人邮编串位。
+      // afterPopup:true —— 公司邮编与公司注册地址 cascader 同属一个 form-item，cascader
+      // 在 Phase 2 的 change 事件会把同 form-item 内的邮编输入框清空；必须等 cascader
+      // 选完后再填（参考 法人邮编 同样的处理）。
+      {
+        type: "text",
+        key: "邮编",
+        labelText: "公司/个体经营注册地址(中文)",
+        elementSelector: 'input[placeholder="请输入邮政编码"]',
+        placeholder: "请输入邮政编码",
+        value: get("邮编"),
+        afterPopup: true,
+      },
       // 注册地址详细（textarea）：xpath 用户提供的绝对路径（最精确），失败时回退到表单项标签查找。
       {
         type: "text",
