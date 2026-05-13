@@ -9,17 +9,18 @@
 
 ### 1.1 组合 (Combination)
 
-一个**组合** = `<国家>|<注册地>`，例如 `Poland|China`、`France|HongKong`。
+一个**组合** = `<国家>|<注册地>`，例如 `Poland|China`、`France|China`、`France|HongKong`。
 
 每个组合声明：
 
 - **必填字段**（`fields`）—— 检查清单
 - **必备文件**（`files`）—— 文件名匹配规则
+- **互斥文件组**（`alternatives`，可选）—— 多个 `fileKeys` 选项里"满足其一即可"的二选一组
 - **AI 识别的文档类型**（`aiDocTypes`）—— 引用积木 ID
 - **地址解析体系**（`addressLocale`）—— 引用积木 ID
 - **自动填充模块**（`autofillModule`）—— 引用积木 ID
-- **数据模块定义**（`modules`）—— 自动填充使用的数据来源映射
-- **占位文件配置**（`placeholders`）—— 哪些缺失项可生成临时空白占位
+- **数据模块定义**（`modules`）—— 自动填充使用的数据来源映射；字段可声明 `showIf` 根据运行时 identityFlow（身份证流程 / 护照流程）过滤显示
+- **占位文件配置**（`placeholders`）—— 哪些缺失项可生成临时空白占位；`kind: "poa_with_seal"` 的委托书盖章可带 `style: "mainland" | "hk"` 风格切换
 
 ### 1.2 积木 (Brick)
 
@@ -27,11 +28,11 @@
 
 | 积木类型 | 命名空间 | 当前已实现 | 描述 |
 |---|---|---|---|
-| AI 文档识别器 | `cn_business_license` / `cn_id_card_front` / `cn_id_card_back` / `cn_tax_cert` / `cn_company_articles` | 是（写死在 `popup.js`） | 单一文档类型的 AI 分类 + 字段提取 |
-| 地址工具 | `zh-CN` | 是（写死在 `popup.js`） | 省市区拆分、邮编查询、地区→省映射等 |
-| 自动填充模块 | `poland_seller_center` / `france_seller_center` | 是（已拆到 `autofill/<id>.js`，与 `popup.js` 顶部的 `AUTOFILL_REGISTRY` 动态 import） | 平台卖家中心 DOM 注入计划（`buildPlan(input)` 返回 plan 数组） |
-| 附件合成器 | `poa_with_seal` | 是（`annex/poa_composer.js` + `annex/seal_generator.js`，由 `placeholders.<key>.kind` 调用） | 委托书 PDF 模板 + Canvas 圆章→ 带章 PDF（pdf-lib） |
-| xlsx 模板映射 | `basic_info_v1` | 是（单元格地址写死在 `modules.fields[].cell`） | 把基础信息表的单元格映射到字段 |
+| AI 文档识别器 | `cn_business_license` / `cn_id_card_front` / `cn_id_card_back` / `cn_tax_cert` / `cn_company_articles` / `hk_business_registration` / `passport` | 是（写死在 `popup.js`，对应 `extractLicenseFields` / `extractIdCardFrontFields` / `extractIdCardBackFields` / `extractHkCrFields` / `extractPassportFields` 等） | 单一文档类型的 AI 分类 + 字段提取 |
+| 地址工具 | `zh-CN` | 是（写死在 `popup.js`，内置中国邮编查询 + 香港 18 区 cascader 三级解析 `resolveHkAddress`） | 省市区拆分、邮编查询、地区→省映射、HK 区议会选区识别 |
+| 自动填充模块 | `poland_seller_center` / `france_seller_center` | 是（已拆到 `autofill/<id>.js`，与 `popup.js` 顶部的 `AUTOFILL_REGISTRY` 动态 import）；`france_seller_center` 同时服务 `France\|China` 与 `France\|HongKong` | 平台卖家中心 DOM 注入计划（`buildPlan(input)` 返回 plan 数组） |
+| 附件合成器 | `poa_with_seal` | 是（`annex/poa_composer.js` + `annex/seal_generator.js`，由 `placeholders.<key>.kind` 调用；支持 `style: "mainland" / "hk"` 双风格） | 委托书 PDF 模板 + Canvas 圆章→ 带章 PDF（pdf-lib） |
+| xlsx 模板映射 | `basic_info_v1` | 是（单元格地址写死在 `modules.fields[].cell`，支持 `fallbackCell` 主 cell 空值回退） | 把基础信息表的单元格映射到字段 |
 
 > **当前阶段（Stage 1 → Stage 2 过渡中）**：`autofill` 积木已物理拆出（详见 `autofill/poland_seller_center.js` / `autofill/france_seller_center.js`）；附件合成器也已独立（`annex/`）。**AI 文档识别器**、**地址工具**、**xlsx 模板映射**仍写死在 `popup.js`，计划在 Stage 2 拆到 `ai/`、`address/`、`xlsx/` 子目录。
 
@@ -109,17 +110,24 @@
 
 | source | 含义 | 必需的额外字段 |
 |---|---|---|
-| `xlsx` | 从基础信息表 xlsx 读取单元格 | `cell`（如 `"C3"`） |
+| `xlsx` | 从基础信息表 xlsx 读取单元格 | `cell`（如 `"C3"`）；可选 `fallbackCell`（字符串或数组，主 cell 空值时按序尝试） |
+| `xlsx_translate_to_zh` | 读 xlsx 单元格，若不含汉字则调 Kimi 翻译为简体中文（`France\|HongKong` 的护照流程详细地址用） | `cell` |
 | `file_path` | 取已识别文件的路径 | `fileKey`（对应 `files[].key`，如 `"business_license"`） |
 | `ai_license` | 从 AI 识别的营业执照字段取值 | `aiField` |
 | `ai_idcard_front` | 从 AI 识别的身份证正面取值 | `aiField` |
 | `ai_idcard_back` | 从 AI 识别的身份证反面取值 | `aiField` |
+| `ai_hk_cr` | 从 AI 识别的香港公司注册证书 CR 取值（如 `发出日期` → 公司成立日期） | `aiField` |
+| `ai_passport` | 从 AI 识别的护照取值 | `aiField` |
+| `identity_field` | 身份证 / 护照通用字段——根据当前 identityFlow 自动从 `aiIdCardFront` 或 `aiPassport` 取值 | `idField`（身份证流取该字段名）+ `passportField`（护照流取该字段名） |
+| `passport_validity` | 把 AI 识别的护照"签发日期 - 有效期至"拼成有效期限字符串 | （无） |
 | `postal_from_idcard_address` | 从身份证地址查邮编 | （无） |
-| `idcard_or_passport` | 根据是否检测到身份证返回 `"法人身份证"` 或空 | （无） |
+| `idcard_or_passport` | 根据是否检测到身份证/护照返回 `"法人身份证"` / `"法人护照"` / 空 | （无） |
 | `platform_from_url` | 从 xlsx 一个店铺链接单元格推导「主要销售平台」（amazon→亚马逊 / aliexpress→速卖通 / temu→Temu / tiktok→TikTok / 其他→其他） | `urlCell`（如 `"C13"`） |
 | `default` | 硬编码默认值 | `value` |
 
 任何 source 都可以加 `defaultValue`，作为取不到值时的兜底。
+
+字段还可声明 `showIf: "idcard"` 或 `showIf: "passport"`，由运行时 `identityFlow`（基于 AI 识别结果推断："idcard" / "passport" / 空）决定该字段是否参与渲染——主要用于 `France|HongKong` 的"身份证流程 vs 护照流程"分支。`showIf` 缺省的字段永远显示。
 
 ### 2.2 `placeholders[fileKey]`
 
@@ -130,13 +138,18 @@
 | `kind` | `"pdf"` / `"png"` / `"poa_with_seal"` | 占位 / 生成文件的类型 |
 | `filename` | 字符串 | 生成的文件名 |
 | `text` | 字符串 | （`pdf` / `png`）占位图上显示的文字 |
+| `style` | `"mainland"` / `"hk"`（仅 `poa_with_seal`，默认 `"mainland"`） | 圆章风格。`mainland`：红色外圈 + 弧形中文名 + 中心五角星；`hk`：深蓝外圈 + 弧形英文名 + 中心多行中文名方块 + 底部小星 |
 | `companyNameFrom` | `{ module, field }` | （`poa_with_seal`）从 `lastModulesData` 取公司中文名作为圆章文字；可被面板内手动输入覆盖 |
+| `englishNameFrom` | `{ module, field }` | （`poa_with_seal` + `style: "hk"`）从 `lastModulesData` 取公司英文名作为外圈弧形文字，默认指向 `店铺信息 → 公司英文名称` |
+| `sealOpts` | 对象 | （`poa_with_seal`）圆章渲染参数初值——`color` / `ringWidth` / `secondaryRingWidth` / `textRadiusRatio` / `fontSize` / `bottomFontSize` 等；可在「委托书圆章」面板的高级参数实时调节 |
 
 **`kind: "poa_with_seal"`** 是一个与 `kind: "pdf"` / `"png"` 同级的附件合成器，调用 `annex/poa_composer.js`：
 - 加载 `annex/委托书.pdf` 作为模板
-- `annex/seal_generator.js` 用 Canvas 生成红色公司圆章 PNG（弧形公司名 + 中心五角星）
+- `annex/seal_generator.js` 用 Canvas 生成公司圆章 PNG：
+  - `mainland` 风格：红色外圈描边 + 弧形中文名 + 中心五角星（`Poland|China` / `France|China` 默认）
+  - `hk` 风格：深蓝色外圈描边 + 弧形英文名 + 中心多行中文名方块 + 底部小星（`France|HongKong` 专用）
 - pdf-lib `embedPng` 后在红框中心叠加章→ 输出带章 PDF
-- popup 会额外显示「委托书圆章」面板（`showPoaSealPanel()`），支持预览与高级参数微调（`sealBox.centerX/Y/diameter/rotateRad` 、`sealOpts.color/font/ringWidth/textRadiusRatio/starRatio`）。
+- popup 会额外显示「委托书圆章」面板（`showPoaSealPanel()`），支持预览与高级参数微调（`sealBox.centerX/Y/diameter/rotateRad`、`sealOpts.color/font/ringWidth/secondaryRingWidth/textRadiusRatio/fontSize/bottomFontSize/starRatio`）。
 
 ### 2.3 `aiDocTypes` 当前可用 ID
 
@@ -259,7 +272,9 @@ Moonshot API Key 已迁出代码，用户在「⚙️ 配置」 tab 输入，存
 - [x] **把 `buildAutofillPlan` 拆到 `autofill/<id>.js`**，导出 `default.buildPlan(input) => plan[]`，并在 `popup.js` 顶部用 `AUTOFILL_REGISTRY` 动态 import（启动时有 `validateConfigBricks` 校验）
 - [x] **修复 4.1 的下拉联动 bug**（`getRegistrationsForCountry`）
 - [x] **API Key 迁 `chrome.storage.local`**，配合「⚙️ 配置」 tab + 连通性测试
-- [x] **附件合成器（`annex/`）**：`poa_composer.js` + `seal_generator.js` + `placeholders.<key>.kind = "poa_with_seal"`
+- [x] **附件合成器（`annex/`）**：`poa_composer.js` + `seal_generator.js` + `placeholders.<key>.kind = "poa_with_seal"`，支持 `mainland` / `hk` 双风格
+- [x] **互斥文件组 `alternatives`**：支持"身份证 或 护照"这类二选一必填，进度面板 `renderMissingItems` 统一渲染（`France|HongKong` 已启用）
+- [x] **身份流分支 `identityFlow` + `showIf` 字段过滤 + `identity_field` 通用 source**：让 `requirements.json` 能声明同一组合内两套证件流程共存
 - [ ] **把 `MODULES` 引用的"AI 字段提取函数"拆到 `ai/docTypes/*.js`**，每份导出统一接口：
    ```js
    export default {
@@ -269,7 +284,7 @@ Moonshot API Key 已迁出代码，用户在「⚙️ 配置」 tab 输入，存
    };
    ```
 - [ ] **让 `detectWithAI` 的 prompt 由 `currentReqConfig.aiDocTypes` 动态拼接**（依赖上一项）
-- [ ] **把地址逻辑拆到 `address/zh_CN.js`**（`splitAddressPrefix` / `splitAddressIntoRegionAndDetail` / `getPostalCodeForAddress` / `normalizeRegistrationAuthority`），按 `addressLocale` 动态加载
+- [ ] **把地址逻辑拆到 `address/zh_CN.js` / `address/zh_HK.js`**（`splitAddressPrefix` / `splitAddressIntoRegionAndDetail` / `getPostalCodeForAddress` / `resolveHkAddress` / `normalizeRegistrationAuthority`），按 `addressLocale` 动态加载
 - [ ] **把 `requirements.json` 拆成 `config/combinations/*.json`** 多文件，便于 git diff 与多人并行加组合
 - [ ] **imgbb API Key 迁出代码**（代码里现以明文存放）
 
@@ -284,14 +299,14 @@ PL-tool2/
   manifest.json                      # MV3 清单
   popup.html
   popup.css
-  popup.js                           # 主逻辑（~3500 行，~180 KB；UI / AI 调度 / 字段构建 / 委托书面板 / 手写签名）
-  requirements.json                  # 全部组合配置（apiKey 已移至 chrome.storage.local）
+  popup.js                           # 主逻辑（~5000 行，~235 KB；UI / AI 调度 / 字段构建 / 委托书面板 / 手写签名 / 互斥组解析 / 身份流分支）
+  requirements.json                  # 全部组合配置（apiKey 已移至 chrome.storage.local；当前含 Poland|China / France|China / France|HongKong）
   autofill/                          # ✅ 自动填充积木（已拆出）
     poland_seller_center.js
-    france_seller_center.js
+    france_seller_center.js          # 同时服务 France|China 与 France|HongKong
   annex/                             # ✅ 附件合成器（已拆出）
     poa_composer.js                  # pdf-lib 委托书合成
-    seal_generator.js                # Canvas 公司圆章
+    seal_generator.js                # Canvas 公司圆章（mainland 红章 / hk 深蓝章双风格）
     委托书.pdf                       # 委托书 A4 模板（含红框盖章位）
   handwriting/                       # 手写签名（云烟体 + 7-sigma 扰动）
     fonts/yunyan-data.js
