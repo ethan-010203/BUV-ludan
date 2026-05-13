@@ -1,18 +1,31 @@
 /**
  * annex/seal_generator.js
- * 圆形红色公章生成器（Canvas）。完全离线，无第三方依赖。
+ * 圆形公章生成器（Canvas）。完全离线，无第三方依赖。支持 两种风格：
  *
- * 风格参照常见 中国公章 / 公司印章 规范：
- *   - 外圈红色描边
- *   - 公司中文名沿圆环顶部弧线绕排（每个字"底部朝圆心"，标准印章字向）
- *   - 中心红色五角星（与外圈同色）
- *   - 透明背景（便于叠加到 PDF 模板上）
+ *   style: "mainland"  （默认 · 大陆公章风）
+ *     - 外圈红色描边
+ *     - 公司中文名沿圆环顶部弧线绕排（每个字"底部朝圆心"，标准印章字向）
+ *     - 中心红色五角星（与外圈同色）
+ *
+ *   style: "hk"        （香港公章风，对应法国|香港组合的委托书盖章）
+ *     - 外圈深蓝色描边
+ *     - 公司英文名沿外圈顶部弧线绕排（serif 字体，"HONG KONG XXX CO., LIMITED"）
+ *     - 公司中文名在中心，多行方块布局，每行水平居中（如：香港 / XXX / 有限公司）
+ *       中文名为空时，中心区域留空，仅显示外圈英文 + 底部小星
+ *     - 底部一颗小五角星（不在中心；中心让位给中文名块）
+ *
+ * 共用：透明背景（便于叠加到 PDF 模板上）
  *
  * 暴露：
  *   window.SealGenerator.generate(name, opts)        -> { canvas, dataURL }
  *   window.SealGenerator.generateDataURL(name, opts) -> string
  *   window.SealGenerator.generateBlob(name, opts)    -> Promise<Blob>
  *   window.SealGenerator.generatePngBytes(name, opts)-> Promise<Uint8Array>   // 给 pdf-lib 用
+ *
+ * HK 模式调用约定（保持 API 形状不变）：
+ *   - 第 1 个参数 `name` 仍是 公司中文名（中心方块；可为空字符串）
+ *   - 英文名通过 `opts.englishName` 传入
+ *   - `opts.style = "hk"` 触发分支
  *
  * 选项默认值与 Image 2 那种"中型公司圆章"一致，可被覆盖；详见 generate() 内注释。
  */
@@ -121,6 +134,251 @@
   }
 
   // -------------------------------------------------------------------------
+  // HK 风格中心中文方块布局：按 "香港 / XXX / 有限公司" 这种自然语义切行。
+  // 返回 [[char,...], ...]，每个子数组是一行字符。
+  //
+  // 切行规则（经验值，匹配用户提供的三张 HK 章图）：
+  //   1) 若以 "香港" 开头 → 单独成第一行（地名前缀习惯独占一行）
+  //   2) 若以 公司后缀（"有限公司" / "股份有限公司" / "集团有限公司" / "股份公司" / "公司" 等）
+  //      结尾 → 整段后缀独占最后一行
+  //   3) 中间段按 ≤5 字/行（少于等于 5 不拆）、≤8 字 / 拆 2 行、超过 8 字按 ceil(N/4) 行
+  //      均分。最大化"行宽接近"以贴近真实印章的方块感。
+  //
+  // 没匹配到前缀/后缀也能跑：直接对全部字符走步骤 3。
+  // -------------------------------------------------------------------------
+  function layoutCenterLines(name) {
+    const trimmed = String(name || '').trim().replace(/\s+/g, '');
+    if (!trimmed) return [];
+
+    const lines = [];
+    let s = trimmed;
+
+    // 1) 香港 前缀 → 独占一行
+    if (/^香港/.test(s)) {
+      lines.push(Array.from('香港'));
+      s = s.slice(2);
+    }
+
+    // 2) 公司后缀 → 暂存到 suffixLine，最后追加
+    // 长后缀优先匹配（"股份有限公司" 比 "有限公司" 优先）
+    const SUFFIXES = ['股份有限公司', '集团有限公司', '有限合伙企业', '有限公司', '股份公司', '集团', '公司'];
+    let suffixLine = null;
+    for (const suf of SUFFIXES) {
+      if (s.endsWith(suf)) {
+        suffixLine = Array.from(suf);
+        s = s.slice(0, -suf.length);
+        break;
+      }
+    }
+
+    // 3) 中间段均分
+    const midChars = Array.from(s);
+    const midLen = midChars.length;
+    if (midLen > 0) {
+      let midLines;
+      if (midLen <= 5) midLines = 1;
+      else if (midLen <= 8) midLines = 2;
+      else midLines = Math.ceil(midLen / 4);
+
+      const perLine = Math.ceil(midLen / midLines);
+      for (let i = 0; i < midLen; i += perLine) {
+        lines.push(midChars.slice(i, i + perLine));
+      }
+    }
+
+    if (suffixLine) lines.push(suffixLine);
+
+    return lines;
+  }
+
+  // -------------------------------------------------------------------------
+  // 在 (cx, cy) 周围一个内接圆（半径 innerR）内绘制 多行中文方块。
+  //   - 每一行水平居中
+  //   - 行间距 = fontSize（即字与字、行与行的"格子"基本同尺寸，方块感）
+  //   - fontSize 自适应：使 rows × maxCols 的字符矩阵能完整放进 innerR 圆内
+  //     （以矩形对角线 ≤ 2*innerR 估算，留 0.95 倍 padding）
+  //   - opts.fontSize > 0 时直接采用，跳过自适应
+  //   - opts.explicitLines（数组，每串=一行）若给出，跳过 layoutCenterLines 自动拆分
+  // -------------------------------------------------------------------------
+  function drawCenterTextBlock(ctx, name, cx, cy, innerR, opts) {
+    const lines = (opts.explicitLines && opts.explicitLines.length > 0)
+      ? opts.explicitLines
+      : layoutCenterLines(name);
+    if (lines.length === 0) return;
+
+    const rows = lines.length;
+    const maxCols = Math.max(...lines.map((l) => l.length));
+
+    // 自适应字号：让 rows × maxCols 的方块（按字号当单元尺寸）刚好放进 2*innerR 圆
+    // 对角线公式：sqrt(maxCols² + rows²) * fontSize ≤ 2 * innerR
+    let fontSize = (2 * innerR / Math.sqrt(maxCols * maxCols + rows * rows)) * 0.95;
+    if (opts.fontSize && opts.fontSize > 0) fontSize = opts.fontSize;
+
+    ctx.save();
+    ctx.fillStyle = opts.color;
+    ctx.font = `${opts.fontBold ? 'bold ' : ''}${Math.round(fontSize)}px ${opts.font}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 行垂直布局：第 i 行 中心 y = cy + (i - (rows-1)/2) * fontSize
+    for (let i = 0; i < rows; i++) {
+      const lineChars = lines[i];
+      const numInLine = lineChars.length;
+      const yi = cy + (i - (rows - 1) / 2) * fontSize;
+      // 同一行字水平居中，字间距 = fontSize（方块网格）
+      for (let j = 0; j < numInLine; j++) {
+        const xi = cx + (j - (numInLine - 1) / 2) * fontSize;
+        ctx.fillText(lineChars[j], xi, yi);
+      }
+    }
+    ctx.restore();
+  }
+
+  // -------------------------------------------------------------------------
+  // HK 风格主渲染。返回 { canvas, size, ringRadius }。
+  // 与 render()（mainland）的差异：
+  //   - 外圈 / 次外圈 / 内圈 三同心圆（粗细可调）
+  //   - 外圈顶部绕排 英文公司名（serif 粗体）
+  //   - 中心中文多行方块：
+  //       - 默认按 layoutCenterLines 自动拆分 (香港/XXX/有限公司)
+  //       - 若传 opts.centerLines = [ "香港", "某某印章", "有限公司", "样式章" ]，
+  //         则按用户逐行输入渲染（image 2 面板：中心 4 个输入框 = 4 行）
+  //   - 底部一行文本 / 字符（opts.bottomText，默认 "*"，可改为 "★"、"专用章"）
+  //     底部文本用独立字号 opts.bottomFontSize 控制
+  // -------------------------------------------------------------------------
+  function renderHK(chineseName, englishName, options) {
+    const opts = Object.assign({
+      size: 400,
+      color: 'rgba(51,51,102,1)',                                      // HK 章默认深蓝紫（#333366）
+      // 三同心圆粗细：外 / 次外 / 内（默认以用户给的样式参考图为准：17 / 8 / 8）
+      ringWidth: 17,
+      secondaryRingWidth: 8,
+      innerRingWidth: 8,
+      secondaryRingGap: 10,                                             // 外圈与次外圈的"视觉空白"宽度
+      innerRingRatio: 0.62,                                             // 内圈半径 / 外圈半径
+      ringPadding: 8,
+      // 中心中文（沿用通用 font/fontBold/fontSize 字段，便于复用 popup 面板控件）
+      font: '"SimSun","宋体","STSong","NSimSun","FangSong","STFangsong","KaiTi","STKaiti",serif',
+      fontBold: true,
+      fontSize: 0,
+      centerLines: null,                                                // 按行输入；数组 = 覆盖自动拆分
+      // 外圈英文（独立字段：HK 章特有，与 mainland 字段不冲突）
+      // 默认与中心中文一样用 宋体（SimSun），且不加粗 —— 与用户提供的样式参考图一致
+      enFont: '"SimSun","宋体","STSong","NSimSun",serif',
+      enFontBold: false,
+      enFontSize: 0,
+      // 外圈弧线参数（沿用通用 arcSpan/textRadiusRatio 字段）
+      arcSpan: 0,
+      textRadiusRatio: 0.79,                                            // 弧文半径 / 外圈半径
+      // 中心中文方块内接圆半径 / 外圈半径（内圈里）
+      centerInnerRatio: 0.52,
+      // 中心方块整体往上偏移 (×ringRadius)，给底部文本让出空间
+      centerYOffsetRatio: -0.08,
+      // 底部文本（默认单个 "*"；可改为 "★"、"专用章" 等）
+      bottomText: '*',
+      bottomFontSize: 0,                                                // 0 = 由面板/readPoaSealParams 覆盖；renderHK 层级用 size*0.12 兜底
+      bottomOffsetRatio: 0.78,                                          // 底部文本中心 y / 外圈半径
+    }, options || {});
+
+    const size = opts.size;
+    const cx = size / 2;
+    const cy = size / 2;
+    const ringRadius = size / 2 - opts.ringPadding - opts.ringWidth / 2;
+    // secondaryRingGap 现在表示"两条线之间的视觉空白宽度"（外圈内缘 → 次外圈外缘的距离），
+    // 而非圆心距 —— 这样不管两条线粗细如何变化，视觉间距都恒定。
+    // 公式：外圈内缘半径 = ringRadius - ringWidth/2
+    //       次外圈外缘半径 = secondaryRadius + secondaryRingWidth/2
+    //       期望：(ringRadius - ringWidth/2) - (secondaryRadius + secondaryRingWidth/2) = gap
+    const secondaryRadius = ringRadius - opts.ringWidth / 2 - opts.secondaryRingGap - opts.secondaryRingWidth / 2;
+    const innerRadius = ringRadius * opts.innerRingRatio;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+
+    // 1) 三同心圆
+    ctx.save();
+    ctx.strokeStyle = opts.color;
+    // 外圈
+    ctx.lineWidth = opts.ringWidth;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    // 次外圈
+    if (opts.secondaryRingWidth > 0 && secondaryRadius > 0) {
+      ctx.lineWidth = opts.secondaryRingWidth;
+      ctx.beginPath();
+      ctx.arc(cx, cy, secondaryRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 内圈（围中心中文方块）
+    if (opts.innerRingWidth > 0 && innerRadius > 0) {
+      ctx.lineWidth = opts.innerRingWidth;
+      ctx.beginPath();
+      ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 2) 外圈与次外圈之间：英文弧文
+    const enChars = Array.from(String(englishName || '').trim());
+    if (enChars.length > 0) {
+      const arcSpan = opts.arcSpan || autoArcSpan(enChars.length);
+      const enFontSize = opts.enFontSize || autoFontSize(
+        size, opts.ringWidth, opts.ringPadding, enChars.length, arcSpan
+      );
+      // 弧文半径：默认在外圈和次外圈中间偏外
+      const textRadius = ringRadius * opts.textRadiusRatio;
+      drawArcText(ctx, enChars, cx, cy, textRadius, arcSpan, {
+        color: opts.color,
+        font: opts.enFont,
+        fontSize: enFontSize,
+        fontBold: opts.enFontBold,
+      });
+    }
+
+    // 3) 内圈之内：中心中文方块
+    const hasExplicitLines = Array.isArray(opts.centerLines) && opts.centerLines.length > 0;
+    if (hasExplicitLines || String(chineseName || '').trim()) {
+      const innerR = ringRadius * opts.centerInnerRatio;
+      const yOff = ringRadius * opts.centerYOffsetRatio;
+      let explicitLines = null;
+      if (hasExplicitLines) {
+        // 把用户每行输入拆成字符数组；空行忽略（image 2 第 4 行可能为空）
+        explicitLines = opts.centerLines
+          .map((s) => String(s || '').trim())
+          .filter((s) => s.length > 0)
+          .map((s) => Array.from(s));
+      }
+      drawCenterTextBlock(ctx, chineseName, cx, cy + yOff, innerR, {
+        color: opts.color,
+        font: opts.font,
+        fontBold: opts.fontBold,
+        fontSize: opts.fontSize,
+        explicitLines,
+      });
+    }
+
+    // 4) 底部文本（"*" / "★" / 等）
+    const bottomText = String(opts.bottomText || '').trim();
+    if (bottomText) {
+      const bFontSize = opts.bottomFontSize > 0 ? opts.bottomFontSize : size * 0.12;
+      const by = cy + ringRadius * opts.bottomOffsetRatio;
+      ctx.save();
+      ctx.fillStyle = opts.color;
+      ctx.font = `${opts.fontBold ? 'bold ' : ''}${Math.round(bFontSize)}px ${opts.font}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bottomText, cx, by);
+      ctx.restore();
+    }
+
+    return { canvas, size, ringRadius };
+  }
+
+  // -------------------------------------------------------------------------
   // 主函数：渲染圆章到 canvas。
   // 返回 { canvas, width, height }。dataURL/blob/PngBytes 由便捷方法转换。
   // -------------------------------------------------------------------------
@@ -202,6 +460,18 @@
   }
 
   function generate(name, options) {
+    options = options || {};
+    // HK 分支：name = 中文公司名（可空，留空中心），英文名走 options.englishName。
+    // 这样保持 generate(name, opts) 单一入口，调用方/PoaComposer 只需在 sealOpts 里多塞
+    // style + englishName 两个字段就能切到 HK 样式，不必拆分新 API。
+    if (options.style === 'hk') {
+      const r = renderHK(name, options.englishName, options);
+      return {
+        canvas: r.canvas,
+        dataURL: r.canvas.toDataURL('image/png'),
+        size: r.size,
+      };
+    }
     const r = render(name, options);
     return {
       canvas: r.canvas,

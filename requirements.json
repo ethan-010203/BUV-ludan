@@ -4,7 +4,8 @@
     "France": { "label": "法国 (France)" }
   },
   "registrations": {
-    "China": { "label": "中国大陆 (China Mainland)" }
+    "China": { "label": "中国大陆 (China Mainland)" },
+    "HongKong": { "label": "香港 (Hong Kong)" }
   },
   "requirements": {
     "Poland|China": {
@@ -166,6 +167,116 @@
             { "key": "性别",                           "source": "ai_idcard_front", "aiField": "性别" },
             { "key": "民族",                           "source": "ai_idcard_front", "aiField": "民族" },
             { "key": "身份证签发机关",                   "source": "ai_idcard_back",  "aiField": "签发机关" }
+          ]
+        },
+        {
+          "title": "店铺信息",
+          "fields": [
+            { "key": "主要销售平台",                       "source": "platform_from_url", "urlCell": "C13" },
+            { "key": "主要销售平台店铺链接",               "source": "xlsx",    "cell": "C13" },
+            { "key": "主要销售平台店铺ID",                 "source": "xlsx",    "cell": "C12" },
+            { "key": "公司英文名称",                       "source": "xlsx",    "cell": "C4" },
+            { "key": "公司/个体经营注册地址（英文）",      "source": "xlsx",    "cell": "C6" },
+            { "key": "联系邮箱",                           "source": "xlsx",    "cell": "C15" },
+            { "key": "公司（个人）店铺主要经营范围",       "source": "default", "value": "电子商品 electrical products" },
+            { "key": "是否已填写所有销售中的平台店铺信息", "source": "default", "value": "是" },
+            { "key": "未来12个月销售预估",                 "source": "default", "value": "100" },
+            { "key": "未来12个月预估税金",                 "source": "default", "value": "100" },
+            { "key": "公司(个人)店铺简称/名称",            "source": "xlsx",    "cell": "C11" },
+            { "key": "店铺联系电话",                       "source": "xlsx",    "cell": "C14" }
+          ]
+        }
+      ]
+    },
+
+    "France|HongKong": {
+      "label": "法国 - 香港注册",
+
+      "addressLocale": "zh-CN",
+      "autofillModule": "france_seller_center",
+      "xlsxTemplate": "basic_info_v1",
+      "aiDocTypes": [
+        "hk_business_registration",
+        "cn_id_card_front",
+        "cn_id_card_back",
+        "passport",
+        "cn_company_articles"
+      ],
+
+      "fields": [
+        { "key": "id_card_front", "label": "身份证正面", "required": false },
+        { "key": "id_card_back", "label": "身份证反面", "required": false },
+        { "key": "passport", "label": "护照", "required": false },
+        { "key": "hk_business_registration", "label": "香港公司注册证书CR", "required": true },
+        { "key": "company_articles", "label": "公司章程", "required": true },
+        { "key": "shop_backend_screenshot", "label": "店铺后台截图", "required": true },
+        { "key": "power_of_attorney", "label": "委托书盖章", "required": true },
+        { "key": "basic_info", "label": "基础信息表", "required": true }
+      ],
+
+      "files": [
+        { "key": "id_card_front", "pattern": "身份证正面", "label": "身份证正面", "required": false, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"] },
+        { "key": "id_card_back", "pattern": "身份证反面", "label": "身份证反面", "required": false, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"] },
+        { "key": "passport", "pattern": "护照", "label": "护照", "required": false, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png", ".pdf"] },
+        { "key": "hk_business_registration", "pattern": "公司注册证书", "label": "香港公司注册证书CR", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png", ".pdf"], "showInAutofill": true, "autofillStatusLabel": "香港公司注册证书文件", "convertImageToPdf": true },
+        { "key": "company_articles", "pattern": "公司章程", "label": "公司章程", "required": true, "matchType": "contains", "allowedExtensions": [".pdf"], "showInAutofill": true, "autofillStatusLabel": "公司章程文件", "convertImageToPdf": true },
+        { "key": "shop_backend_screenshot", "pattern": "店铺后台截图", "label": "店铺后台截图", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png"], "showInAutofill": true, "convertImageToPdf": false },
+        { "key": "power_of_attorney", "pattern": "委托书盖章", "label": "委托书盖章", "required": true, "matchType": "contains", "allowedExtensions": [".jpg", ".jpeg", ".png", ".pdf"], "showInAutofill": true, "autofillStatusLabel": "委托书盖章文件", "convertImageToPdf": true },
+        { "key": "basic_info", "pattern": ".xlsx", "label": "基础信息表", "required": true, "matchType": "endsWith", "xlsxA1Contains": "新注册申请登记表" }
+      ],
+
+      "alternatives": [
+        {
+          "key": "legal_person_identity",
+          "label": "法人证件",
+          "options": [
+            { "label": "身份证（正面+反面）", "fileKeys": ["id_card_front", "id_card_back"] },
+            { "label": "护照", "fileKeys": ["passport"] }
+          ]
+        }
+      ],
+
+      "placeholders": {
+        "shop_backend_screenshot": { "kind": "png", "filename": "店铺后台截图_临时占位.png", "text": "店铺后台截图（临时占位）" },
+        "power_of_attorney":       { "kind": "poa_with_seal", "filename": "委托书盖章_自动生成.pdf", "style": "hk", "companyNameFrom": { "module": "公司信息", "field": "公司名称" }, "englishNameFrom": { "module": "店铺信息", "field": "公司英文名称" }, "sealOpts": { "color": "#333366", "ringWidth": 17, "secondaryRingWidth": 8, "textRadiusRatio": 0.79, "fontSize": 77, "bottomFontSize": 100 } }
+      },
+
+      "modules": [
+        {
+          "title": "公司信息",
+          "fields": [
+            { "key": "公司名称",                       "source": "xlsx",       "cell": "C3", "fallbackCell": "C4" },
+            { "key": "公司注册地",                     "source": "default",    "value": "香港公司" },
+            { "key": "香港公司注册证书CR",             "source": "file_path",  "fileKey": "hk_business_registration" },
+            { "key": "公司章程",                       "source": "file_path",  "fileKey": "company_articles" },
+            { "key": "营业执照号码/注册号",            "source": "xlsx",       "cell": "C8" },
+            { "key": "公司类型",                       "source": "default",    "value": "有限责任公司" },
+            { "key": "公司成立日期",                   "source": "ai_hk_cr",   "aiField": "发出日期" },
+            { "key": "注册资本",                       "source": "default",    "value": "500000" },
+            { "key": "公司/个体经营注册地址(中文)",    "source": "xlsx",       "cell": "C5" },
+            { "key": "邮编",                           "source": "xlsx",       "cell": "C7" }
+          ]
+        },
+        {
+          "title": "法人代表信息",
+          "fields": [
+            { "key": "上传法人代表证件信息",           "source": "idcard_or_passport" },
+            { "key": "法人代表身份证（人像面）",       "source": "file_path",       "fileKey": "id_card_front", "showIf": "idcard" },
+            { "key": "法人代表身份证（国徽面）",       "source": "file_path",       "fileKey": "id_card_back",  "showIf": "idcard" },
+            { "key": "法人代表护照",                   "source": "file_path",       "fileKey": "passport",      "showIf": "passport" },
+            { "key": "法人/个人代表中文名",            "source": "identity_field",  "idField": "姓名", "passportField": "中文名" },
+            { "key": "法人/个人代表身份证号",          "source": "ai_idcard_front", "aiField": "身份证号", "showIf": "idcard" },
+            { "key": "法人/个人代表护照号",            "source": "ai_passport",     "aiField": "护照号",   "showIf": "passport" },
+            { "key": "法人/个人代表拼音名（英文名）",  "source": "identity_field",  "idField": "拼音名", "passportField": "拼音名" },
+            { "key": "法人/个人代表出生日期",          "source": "identity_field",  "idField": "出生日期", "passportField": "出生日期" },
+            { "key": "法人代表身份证有效期限",         "source": "ai_idcard_back",  "aiField": "有效期限", "showIf": "idcard" },
+            { "key": "护照有效期限",                   "source": "passport_validity", "showIf": "passport" },
+            { "key": "法人/个人代表身份证地址",        "source": "ai_idcard_front", "aiField": "住址",     "showIf": "idcard" },
+            { "key": "法人代表详细地址",               "source": "xlsx_translate_to_zh", "cell": "C19",    "showIf": "passport" },
+            { "key": "法人/个人代表身份证邮编",        "source": "postal_from_idcard_address", "showIf": "idcard" },
+            { "key": "性别",                           "source": "identity_field",  "idField": "性别", "passportField": "性别" },
+            { "key": "民族",                           "source": "ai_idcard_front", "aiField": "民族",     "showIf": "idcard" },
+            { "key": "身份证签发机关",                 "source": "ai_idcard_back",  "aiField": "签发机关", "showIf": "idcard" }
           ]
         },
         {

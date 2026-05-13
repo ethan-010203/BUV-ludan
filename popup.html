@@ -102,12 +102,22 @@
           <div id="autofill-status" style="margin-top:8px; font-size:12px; color:#475569; white-space:pre-wrap;"></div>
         </div>
 
-        <!-- POA Seal: 委托书圆章预览 + 调参 + 生成（仅 France|China 等 placeholders.power_of_attorney.kind=poa_with_seal 的组合显示） -->
+        <!-- POA Seal: 委托书圆章预览 + 调参 + 生成（仅 placeholders.power_of_attorney.kind=poa_with_seal 的组合显示）
+             两种章风格：
+               - mainland（默认 · 法国|大陆 / 波兰|大陆）：外圈中文弧文 + 中心红色五角星
+               - hk（法国|香港）                       ：外圈英文弧文 + 中心多行中文方块 + 底部小蓝星
+             style 通过 hidden input 跟踪，由 popup.js::showPoaSealPanel 从 placeholder 配置写入。 -->
         <div id="poa-seal-area" style="display:none; margin-top:12px;">
           <div class="poa-seal-title">🔴 委托书圆章 + 盖章</div>
+          <input type="hidden" id="poa-seal-style" value="mainland">
           <div class="poa-seal-field">
             <label for="poa-seal-company">公司中文名（默认从公司信息读取，可编辑）</label>
             <input type="text" id="poa-seal-company" placeholder="例如：曹县中康网络科技有限公司">
+          </div>
+          <!-- HK 风格专属：公司英文名输入框（绕外圈一周）。mainland 时整行 display:none -->
+          <div class="poa-seal-field" id="poa-seal-english-row" style="display:none;">
+            <label for="poa-seal-english">公司英文名（香港样式 · 默认从店铺信息读取，可编辑）</label>
+            <input type="text" id="poa-seal-english" placeholder="例如：HONG KONG FEISUDA TRADING CO., LIMITED">
           </div>
           <div class="poa-seal-canvas-wrap">
             <canvas id="poa-seal-canvas" width="240" height="240"></canvas>
@@ -133,17 +143,36 @@
               <input type="color" id="poa-seal-color" value="#c62828">
               <span class="poa-seal-val" id="poa-seal-color-val">#c62828</span>
 
-              <label>外圈粗细</label>
+              <label>外边线粗细</label>
               <input type="range" id="poa-seal-ring" min="2" max="24" step="1" value="8">
               <span class="poa-seal-val" id="poa-seal-ring-val">8</span>
+
+              <!-- HK 专属：次外圈、内圈粗细。mainland 模式下整行 display:none -->
+              <label class="poa-seal-hk-only">次边线粗细</label>
+              <input type="range" id="poa-seal-ring2" min="0" max="20" step="1" value="8" class="poa-seal-hk-only">
+              <span class="poa-seal-val poa-seal-hk-only" id="poa-seal-ring2-val">8</span>
+
+              <label class="poa-seal-hk-only">内边线粗细</label>
+              <input type="range" id="poa-seal-ring3" min="0" max="20" step="1" value="8" class="poa-seal-hk-only">
+              <span class="poa-seal-val poa-seal-hk-only" id="poa-seal-ring3-val">8</span>
 
               <label>文字半径比</label>
               <input type="range" id="poa-seal-trr" min="0.5" max="0.95" step="0.01" value="0.8">
               <span class="poa-seal-val" id="poa-seal-trr-val">0.8</span>
 
-              <label>五角星比例</label>
-              <input type="range" id="poa-seal-star" min="0" max="0.45" step="0.01" value="0.39">
-              <span class="poa-seal-val" id="poa-seal-star-val">0.39</span>
+              <!-- mainland 专属：五角星比例。HK 用底部文本（下方两项）替代 -->
+              <label class="poa-seal-mainland-only">五角星比例</label>
+              <input type="range" id="poa-seal-star" min="0" max="0.45" step="0.01" value="0.39" class="poa-seal-mainland-only">
+              <span class="poa-seal-val poa-seal-mainland-only" id="poa-seal-star-val">0.39</span>
+
+              <!-- HK 专属：底部文本（"*" / "★" / "专用章" 等） + 字号 -->
+              <label class="poa-seal-hk-only">底部内容</label>
+              <input type="text" id="poa-seal-bottom-text" value="*" maxlength="8" class="poa-seal-hk-only" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;">
+              <span class="poa-seal-val poa-seal-hk-only">默认 *</span>
+
+              <label class="poa-seal-hk-only">底部字号</label>
+              <input type="range" id="poa-seal-bottom-fontsize" min="0" max="120" step="1" value="100" class="poa-seal-hk-only">
+              <span class="poa-seal-val poa-seal-hk-only" id="poa-seal-bottom-fontsize-val">100px</span>
 
               <label>弧线跨度 (°)</label>
               <input type="range" id="poa-seal-arc" min="0" max="340" step="2" value="300">
@@ -153,14 +182,15 @@
               <input type="range" id="poa-seal-fontsize" min="0" max="100" step="1" value="86">
               <span class="poa-seal-val" id="poa-seal-fontsize-val">86px</span>
 
-              <label>字体</label>
-              <select id="poa-seal-font">
+              <!-- 字体选择仅 mainland 模式可见。HK 模式下 英文/中文 都固定为宋体 -->
+              <label class="poa-seal-mainland-only">字体</label>
+              <select id="poa-seal-font" class="poa-seal-mainland-only">
                 <option value='"SimSun","宋体","STSong","NSimSun",serif' selected>宋体（推荐 · 图二）</option>
                 <option value='"SimHei","黑体","STHeiti",sans-serif'>黑体（粗重）</option>
                 <option value='"KaiTi","STKaiti","楷体",serif'>楷体</option>
                 <option value='"FangSong","STFangsong","仿宋",serif'>仿宋</option>
               </select>
-              <span class="poa-seal-val"></span>
+              <span class="poa-seal-val poa-seal-mainland-only"></span>
             </div>
             <button type="button" class="btn-text" id="poa-seal-reset">↺ 恢复默认参数</button>
           </details>

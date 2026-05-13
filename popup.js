@@ -49,13 +49,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   let uploadedFiles = [];
+  let droppedFolderNames = [];
   let currentReqConfig = null;
   let config = null;
   let apiKey = "";
   let lastValidationResult = null;
   let lastModulesData = null;
   // 存放 AI 提取的原始字段，供 buildAutofillPlan 使用（特别是显示模块里没有的辅助字段，例如 姓拼音/名拼音）
-  let lastAiData = { license: {}, idCardFront: {}, idCardBack: {} };
+  let lastAiData = { license: {}, idCardFront: {}, idCardBack: {}, hkCr: {}, passport: {} };
   // 临时占位文件：label -> File 对象。用户在缺失列表点击"生成临时占位"按钮时填入。
   // 这些文件会被推入 uploadedFiles + lastValidationResult.found，参与一键注入上传。
   let placeholderState = {};
@@ -343,7 +344,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
 
     const prompt = `请识别这份文件的类型。判断规则如下：
-1. 营业执照：图片主体是**一张完整的中国营业执照**，顶部有"营业执照"标题，能看到"统一社会信用代码"或"法定代表人"或"注册资本"等中文字段，通常带红章。
+1. 营业执照：图片主体是**一张完整的中国大陆营业执照**，顶部有"营业执照"标题，能看到"统一社会信用代码"或"法定代表人"或"注册资本"等简体中文字段，通常带红章。**必须是简体中文**；若主体是繁体中文/英文的香港证书 → 属于"香港公司注册证书"，不是本类型。
 2. 身份证正面：图片主体是**一张中国居民身份证的人像面**，必须能看到清晰的人物头像 + "姓名"、"性别"、"民族"、"出生"、"住址"、"公民身份号码"等中文字段，缺一个关键字段都不算。
 3. 身份证反面：图片主体是**一张中国居民身份证的国徽面**，必须能同时看到"中华人民共和国居民身份证"标题 + "签发机关" + "有效期限"中文字段，缺一个都不算。
 4. 完税证明：图片主体是**一张完税证明文件**，标题含"完税证明"或"税收完税证明"，包含纳税人、税款等中文字段。
@@ -351,20 +352,41 @@ document.addEventListener("DOMContentLoaded", async () => {
    - 显著位置出现"公司章程"或"章程"作为标题/主标题；
    - 出现"第一章"、"第一章摘要"、"第一章 总则"、"目录"等章程章节性标题。
    备注：公司章程是中文 PDF 渲染出的纯文本页面（白底黑字，无软件 UI 边框），看到大段中文条款 + 章节序号即可视为"文档页面"，**不要**当成 Word/PPT 截图排除掉。
+6. 香港公司注册证书：图片主体是**一张香港公司注册证书 (Certificate of Incorporation) 或香港商业登记证 (Business Registration Certificate)**，命中以下任一关键特征即可判定：
+   - 出现 "Certificate of Incorporation" 或 "公司註冊證書" 作为主标题；
+   - 出现 "Business Registration Certificate" 或 "商業登記證" 作为主标题；
+   - 出现 "Hong Kong Special Administrative Region" / "香港特別行政區" + "Companies Registry" / "公司註冊處" 或 "Inland Revenue Department" / "稅務局";
+   - 典型特征：繁体中文 + 英文双语排版、公司编号 (Company Number / C.R. No.) 或商业登记号码 (Business Registration Number)。
+   **不要**把中国大陆"营业执照"（简体中文 + 红章）误判为本类型——CN 营业执照的标题是"营业执照"而非 "Certificate of Incorporation" / "公司註冊證書"。
+7. 护照：图片主体是**一张护照证件信息页**。判定的**核心视觉特征**（满足即可判定为"护照"，无需再核对其他字段）：
+   - **图片左半边有一张人物头像照片**（脸部清晰可见的证件照，通常被一层透明覆膜罩住）；并且
+   - **照片正上方 / 紧邻照片左上角的位置出现"护照"或"PASSPORT"字样**（中国护照为红色印刷字体，"护照"在上、"PASSPORT"在下）。
+   这是世界各国护照证件信息页都遵循的固定排版（ICAO 9303 标准）——左侧贴照片、照片旁标"护照/PASSPORT"是护照最有辨识度的强信号，单独命中即足以判定。
+
+   辅助特征（命中其一可进一步加强信心，但**核心特征**已足够判定，缺这些不影响）：
+   - 顶部带有发行国国徽 + 国家全称（中国护照为"中华人民共和国 PEOPLE'S REPUBLIC OF CHINA"，香港特区护照为"中華人民共和國香港特別行政區"）；
+   - 双语字段网格排列：类型/Type、国家码/Country Code、护照号码/Passport No.、姓名/Name、性别/Sex、国籍/Nationality、出生日期/Date of birth、签发日期/Date of issue、有效期至/Date of expiry、签发机关/Authority；
+   - 底部出现 2 行以 "<<" 大量填充的机读字符（MRZ，例如 "POCHNQIAN<<YING<<<<...")。
+
+   **不要**与身份证混淆——身份证主体上**找不到"护照"或"PASSPORT"字样**，标题永远是"中华人民共和国居民身份证"，字段是"姓名 / 性别 / 民族 / 出生 / 住址 / 公民身份号码"而非"护照号 / 国籍 / 有效期"。
 
 **必须返回"未知类型"的情况（强制）：**
 - 网页截图、浏览器界面、后台管理系统、卖家中心、商家中心、表单、Dashboard
-- 英文界面、英文表单、英文文档（中国证件全部是中文，看到大量英文几乎可断定不是）
 - Excel / Word / PPT **软件界面**截图（顶部菜单栏、工具栏可见）、表格列表
 - 仅看到证件的某一栏、某个字段、缩略图、预览图
 - 看不清完整证件原件、模糊不清、被严重遮挡
-- 不满足上述5种类型字段要求的任何图片
+- 不满足上述7种类型字段要求的任何图片
 
 **判断步骤（必须严格遵守）：**
 1. 先看图片整体：是网页UI还是单一文档？是网页/UI → 直接"未知类型"
-2. 再看语言：满屏英文 → "未知类型"
-3. 最后核对该类型要求的中文字段是否**全部**可见，缺任何一个 → "未知类型"
+2. 再看语言 + 布局：
+   - 满屏简体中文 + 红章 + "营业执照"标题 → 候选"营业执照"
+   - 繁体中文 / 双语 + "Certificate of Incorporation" 或 "Business Registration Certificate" 或 "公司註冊證書" 或 "商業登記證" → 候选"香港公司注册证书"
+   - **图片左半边有人物头像照片 + 照片正上方 / 紧邻位置出现 "护照" 或 "PASSPORT" 字样** → 候选"护照"（这是护照的固定排版，命中即判定，无需再找 MRZ 或全部字段）
+   - 满屏英文但不符合 HK 证书 / 护照特征 → "未知类型"
+3. 最后核对该类型要求的字段是否**全部**可见，缺任何一个 → "未知类型"
 4. 公司章程例外：只要命中"章程"标题或"第一章"等章节标题之一即可返回"公司章程"
+5. 护照例外：只要命中"左侧人像 + 相邻位置的 '护照' / 'PASSPORT' 字样"核心特征即可返回"护照"，不必额外核对其他字段
 
 只输出以下之一，不要任何解释、不要任何标点：
 营业执照
@@ -372,6 +394,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 身份证反面
 完税证明
 公司章程
+香港公司注册证书
+护照
 未知类型
 
 绝对严禁编造，宁可错判为"未知类型"也不要乱猜。`;
@@ -406,13 +430,21 @@ document.addEventListener("DOMContentLoaded", async () => {
       const data = await response.json();
       const content = data.choices[0]?.message?.content?.trim() || "";
 
-      // Map AI response to label
+      // Map AI response to label.
+      // 注意：键是 AI 文本包含的关键子串，值是回传给 tryMatch 的 label（需与
+      // requirements.json files[].label 精确相等）。
+      // "香港公司注册证书" → "香港公司注册证书CR"：AI 输出短标签，映射到 France|HongKong
+      // 配置里的带 "CR" 后缀的 label，避免 AI 必须精确复读 "CR" 二字。
+      // "香港公司注册证书" 放在 "营业执照" 之前：includes() 是子串匹配，万一 AI 违反
+      // prompt 返回了完整句子（含两个关键词），更具体的 HK 标签先命中更安全。
       const typeMapping = {
+        '香港公司注册证书': '香港公司注册证书CR',
         '营业执照': '营业执照',
         '身份证正面': '身份证正面',
         '身份证反面': '身份证反面',
         '完税证明': '完税证明',
         '公司章程': '公司章程',
+        '护照': '护照',
         '未知类型': null
       };
 
@@ -554,6 +586,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function handleDroppedFiles(dataTransfer) {
     const files = [];
+    const folderNames = [];
     if (dataTransfer.items) {
       for (let i = 0; i < dataTransfer.items.length; i++) {
         const entry = dataTransfer.items[i].webkitGetAsEntry && dataTransfer.items[i].webkitGetAsEntry();
@@ -564,6 +597,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           }
         } else if (entry && entry.isDirectory) {
           // Directory entry - read recursively
+          folderNames.push(entry.name);
           readDirectoryEntry(entry, files);
         } else {
           const f = dataTransfer.files[i];
@@ -584,10 +618,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     // If we found files directly, save them
     if (files.length > 0) {
       uploadedFiles = files; // File objects kept in-memory only
+      droppedFolderNames = folderNames;
       saveState(); // saves metadata only
       updateFileCount();
       updateValidateBtn();
       hideResults();
+    } else if (folderNames.length > 0) {
+      // 文件夹已识别但目录读取是异步的，先把文件夹名存下来，等异步回调里 updateFileCount 时就能显示
+      droppedFolderNames = folderNames;
     }
   }
 
@@ -617,7 +655,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   function updateFileCount() {
     if (uploadedFiles.length > 0) {
       fileCount.style.display = "flex";
-      fileCountText.textContent = `已选择 ${uploadedFiles.length} 个文件`;
+      const folderPart = droppedFolderNames.length > 0
+        ? `📁 ${droppedFolderNames.join("、")}  ·  `
+        : "";
+      fileCountText.textContent = `${folderPart}已选择 ${uploadedFiles.length} 个文件`;
       uploadArea.classList.add("has-files");
     } else {
       fileCount.style.display = "none";
@@ -627,6 +668,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   clearFilesBtn.addEventListener("click", () => {
     uploadedFiles = [];
+    droppedFolderNames = [];
     placeholderState = {};
     uploadArea.classList.remove("has-files");
     updateFileCount();
@@ -903,7 +945,111 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (provMap[city]) province = provMap[city];
     }
     const region = [province, city, district].filter(Boolean).join(" / ");
-    return { region, detail: rest.trim() };
+    // 清理 detail：末尾常跟一段 6 位邮编（如 "民治街道上油松79栋805室 518000"），
+    // cascader 选完 + 邮编已单独入框，detail 里不再需要保留这段数字。
+    const detail = rest.trim().replace(/[\s　]+\d{6}\s*$/, "").trim();
+    return { region, detail };
+  }
+
+  // HK 18 行政区 → 关键词列表。每个区可由多个街区/地标关键词命中（如"旺角"→油尖旺区）。
+  // 维护原则：每个区第一项是区名本身，后续按"该区里出现频率最高的街区/地标"列出。
+  // 顺序决定优先级：列在前面的区先匹配；如果同一地址同时含"旺角"和"九龙塘"，按本表顺序裁判。
+  // 英文地址不做匹配（太多拼写 / 大小写变体），直接走默认值分支（见 HK_DEFAULT_DISTRICT）。
+  const HK_DISTRICTS = [
+    { name: "中西区",   keywords: ["中西区", "中环", "上环", "西环", "西营盘", "半山", "山顶", "坚尼地城", "石塘咀", "金钟"] },
+    { name: "湾仔区",   keywords: ["湾仔区", "湾仔", "铜锣湾", "跑马地", "大坑", "渣甸山"] },
+    { name: "东区",     keywords: ["北角", "鲗鱼涌", "鯽鱼涌", "太古城", "太古", "西湾河", "筲箕湾", "柴湾", "小西湾", "杏花邨"] },
+    { name: "南区",     keywords: ["南区", "香港仔", "鸭脷洲", "黄竹坑", "浅水湾", "赤柱", "石澳", "薄扶林", "数码港"] },
+    { name: "油尖旺区", keywords: ["油尖旺区", "油尖旺", "油麻地", "尖沙咀", "尖沙嘴", "旺角", "大角咀", "佐敦"] },
+    { name: "深水埗区", keywords: ["深水埗区", "深水埗", "长沙湾", "美孚", "荔枝角", "石硖尾", "又一村", "太子"] },
+    { name: "九龙城区", keywords: ["九龙城区", "九龙城", "红磡", "紅磡", "土瓜湾", "何文田", "启德", "九龙塘", "黄埔"] },
+    { name: "黄大仙区", keywords: ["黄大仙区", "黄大仙", "钻石山", "慈云山", "新蒲岗", "乐富", "横头磡", "彩虹", "牛池湾"] },
+    { name: "观塘区",   keywords: ["观塘区", "观塘", "牛头角", "九龙湾", "蓝田", "油塘", "秀茂坪"] },
+    { name: "葵青区",   keywords: ["葵青区", "葵涌", "青衣", "葵芳", "荔景"] },
+    { name: "荃湾区",   keywords: ["荃湾区", "荃湾", "梨木树", "汀九", "深井", "马湾"] },
+    { name: "屯门区",   keywords: ["屯门区", "屯门"] },
+    { name: "元朗区",   keywords: ["元朗区", "元朗", "天水围", "锦田", "八乡", "流浮山", "新田"] },
+    { name: "北区",     keywords: ["上水", "粉岭", "沙头角", "打鼓岭"] },
+    { name: "大埔区",   keywords: ["大埔区", "大埔", "太和", "大埔滘", "林村"] },
+    { name: "沙田区",   keywords: ["沙田区", "沙田", "大围", "火炭", "马鞍山", "乌溪沙", "第一城"] },
+    { name: "西贡区",   keywords: ["西贡区", "西贡", "将军澳", "调景岭", "坑口", "宝林", "康城"] },
+    { name: "离岛区",   keywords: ["离岛区", "离岛", "大屿山", "长洲", "南丫", "坪洲", "东涌", "愉景湾", "赤鱲角", "迪士尼"] },
+  ];
+
+  // 关键词都命中不到时（例如全英文地址 "UNIT 34 ... TUEN MUN NT 999077 HK"）的默认区。
+  // cascader 里随便选一个合规的区让后续流程能跑通比让用户手动挑更重要。
+  const HK_DEFAULT_DISTRICT = "九龙城区";
+
+  // 把香港地址（如"香港旺角花園街2-16號..."）拆成 cascader 三级 region + 详细 detail。
+  // 卖家中心 cascader：第 1 级"香港特别行政区"，第 2 级再选一次"香港特别行政区"，第 3 级 18 区。
+  //
+  // 例：
+  //   in:  "香港旺角花園街2-16 號好景商業中心5 樓502C 室"
+  //   out: { region: "香港特别行政区 / 香港特别行政区 / 油尖旺区",
+  //          detail: "旺角花園街2-16 號好景商業中心5 樓502C 室" }
+  //
+  // 设计取舍：
+  //   - 区归属用关键词匹配（不依赖完整书写"油尖旺区"），扩展时改 HK_DISTRICTS 表即可
+  //   - 中英文混合 / 全英文地址匹配不上的，统一落到 HK_DEFAULT_DISTRICT（九龙城区）
+  //     ——cascader 必须选到 leaf 才能 commit 值，给个默认让流程能跑通
+  //   - detail 保留原文（仅剥首部"中国/香港"等省级前缀和"九龙/新界/港岛"大区前缀）
+  function splitHkAddressIntoRegionAndDetail(address) {
+    if (!address) return { region: "", detail: "" };
+    let addr = String(address).trim();
+
+    // 剥省级 / 大区前缀；cascader 没有"九龙"/"新界"这一级，要去掉以免污染 detail
+    addr = addr
+      .replace(/^(中国\s*)?(香港特别行政区|香港)\s*/, "")
+      .replace(/^(九龙|新界|港岛|香港岛)\s*/, "");
+
+    let matchedDistrict = "";
+    for (const d of HK_DISTRICTS) {
+      for (const kw of d.keywords) {
+        if (addr.includes(kw)) {
+          matchedDistrict = d.name;
+          break;
+        }
+      }
+      if (matchedDistrict) break;
+    }
+
+    // 没匹配到（多见于全英文地址，如"TUEN MUN / NT / 999077 / HK"）→ 用默认区，
+    // detail 仍要 stripHkDetailTail 剥掉尾部邮编 / "HK" / "Hong Kong" 等冗余后缀，
+    // 与下面"已匹配"分支保持行为一致（之前漏调用导致英文地址尾部带 999077 HK 落到 textarea）
+    if (!matchedDistrict) {
+      return {
+        region: `香港特别行政区 / 香港特别行政区 / ${HK_DEFAULT_DISTRICT}`,
+        detail: stripHkDetailTail(addr),
+      };
+    }
+
+    // 若开头就是区名（如"油尖旺区旺角XXX"），剥掉区名；否则保留街区名
+    let detail = addr;
+    if (detail.startsWith(matchedDistrict)) {
+      detail = detail.slice(matchedDistrict.length).trim();
+    }
+    detail = stripHkDetailTail(detail);
+    return {
+      region: `香港特别行政区 / 香港特别行政区 / ${matchedDistrict}`,
+      detail,
+    };
+  }
+
+  // 清理 HK 详细地址里的尾巴：常见的"…香港 000000" / "…中国 香港" / "… 999077" 等
+  // 邮编/地区名后缀。这些信息在 cascader 已选 + 邮编单独入框后属于冗余。
+  // 香港邮政体系本身没有邮编（5 位 / 6 位是商家自填的"占位"），但模板里常会带一段，统一剥掉。
+  function stripHkDetailTail(s) {
+    if (!s) return "";
+    let v = String(s).trim();
+    for (let i = 0; i < 4; i++) {
+      const before = v;
+      v = v
+        .replace(/[\s　,，、]+\d{3,6}\s*$/, "")           // 末尾 3~6 位数字（含 000000 / 999077）
+        .replace(/[\s　,，、]*(中国|香港|香港特别行政区|HK|Hong\s*Kong)\s*$/i, "")
+        .trim();
+      if (v === before) break;
+    }
+    return v;
   }
 
   function normalizeRegistrationAuthority(authority, address) {
@@ -992,6 +1138,146 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 只输出JSON对象，不要任何额外解释。每个字段如果识别不到，值为null。`;
     return callVisionJson(base64Data, mimeType, prompt, "AI身份证反面");
+  }
+
+  function normalizeDateLike(input) {
+    if (input === null || input === undefined) return "";
+    const raw = String(input).trim();
+    if (!raw) return "";
+
+    let m = raw.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    if (m) {
+      return `${m[1]}-${String(+m[2]).padStart(2, "0")}-${String(+m[3]).padStart(2, "0")}`;
+    }
+
+    const monthMap = {
+      january: 1, jan: 1,
+      february: 2, feb: 2,
+      march: 3, mar: 3,
+      april: 4, apr: 4,
+      may: 5,
+      june: 6, jun: 6,
+      july: 7, jul: 7,
+      august: 8, aug: 8,
+      september: 9, sept: 9, sep: 9,
+      october: 10, oct: 10,
+      november: 11, nov: 11,
+      december: 12, dec: 12
+    };
+    m = raw.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+    if (m && monthMap[m[2].toLowerCase()]) {
+      return `${m[3]}-${String(monthMap[m[2].toLowerCase()]).padStart(2, "0")}-${String(+m[1]).padStart(2, "0")}`;
+    }
+    m = raw.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+    if (m && monthMap[m[1].toLowerCase()]) {
+      return `${m[3]}-${String(monthMap[m[1].toLowerCase()]).padStart(2, "0")}-${String(+m[2]).padStart(2, "0")}`;
+    }
+
+    const compact = raw.replace(/\s+/g, "");
+    const zhDigit = { "零": 0, "〇": 0, "○": 0, "Ｏ": 0, "O": 0, "o": 0, "0": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
+    const zhNum = (s) => {
+      s = String(s || "").trim();
+      if (!s) return NaN;
+      if (/^\d+$/.test(s)) return Number(s);
+      if (!s.includes("十")) return zhDigit[s] ?? NaN;
+      const parts = s.split("十");
+      const tens = parts[0] ? (zhDigit[parts[0]] ?? NaN) : 1;
+      const ones = parts[1] ? (zhDigit[parts[1]] ?? NaN) : 0;
+      return Number.isFinite(tens) && Number.isFinite(ones) ? tens * 10 + ones : NaN;
+    };
+    m = compact.match(/([零〇○ＯOo0一二两三四五六七八九]{4})年([零〇○ＯOo0一二两三四五六七八九十\d]{1,3})月([零〇○ＯOo0一二两三四五六七八九十\d]{1,3})日/);
+    if (m) {
+      const year = Array.from(m[1]).map(ch => zhDigit[ch]).join("");
+      const month = zhNum(m[2]);
+      const day = zhNum(m[3]);
+      if (/^\d{4}$/.test(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
+
+    return raw;
+  }
+
+  async function translateToChineseIfNeeded(text, tag = "AI翻译") {
+    const value = String(text || "").trim();
+    if (!value) return "";
+    if (/[\u4e00-\u9fff]/.test(value)) return value;
+    if (!apiKey) return value;
+    try {
+      const response = await fetchMoonshotChat({
+        model: "kimi-k2.6",
+        messages: [{
+          role: "user",
+          content: `请把下面的地址翻译成简体中文，只输出译文，不要解释，不要加引号：\n${value}`
+        }],
+        thinking: { type: "disabled" }
+      }, tag);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        statusLog(`[${tag}] 失败: ${describeMoonshotError(response.status, errText)}`);
+        return value;
+      }
+      const data = await response.json();
+      return (data.choices[0]?.message?.content || "").trim().replace(/^["“”']|["“”']$/g, "") || value;
+    } catch (e) {
+      statusLog(`[${tag}] 异常: ${e.message}`);
+      return value;
+    }
+  }
+
+  // AI: extract the issue/incorporation date from a 香港公司注册证书 CR / 商业登记证 page
+  async function extractHkCrFields(base64Data, mimeType) {
+    const prompt = `这是一张香港公司注册证书 CR / Certificate of Incorporation 或商业登记证页面。请重点识别证书上的发出日期。
+
+发出日期常见位置和文案：
+- 英文："Issued on 7 January 2026."、"Issued on 7 Jan 2026"
+- 繁体中文："本 證 明 書 於 二Ｏ二六 年 一 月 七 日 發 出。"
+
+请以严格 JSON 输出：
+{
+  "发出日期": "证书发出日期，必须转为 YYYY-MM-DD，例如 2026-01-07。",
+  "发出日期原文": "证书上日期附近的原文。",
+  "公司编号": "Company Number / C.R. No.，识别不到则为 null。"
+}
+
+只输出JSON对象，不要任何额外解释。每个字段如果识别不到，值为null。`;
+    const fields = await callVisionJson(base64Data, mimeType, prompt, "AI香港CR");
+    if (fields && fields.发出日期) fields.发出日期 = normalizeDateLike(fields.发出日期);
+    return fields || {};
+  }
+
+  // AI: extract structured fields from a passport information page
+  async function extractPassportFields(base64Data, mimeType) {
+    const prompt = `这是一张护照证件信息页。请根据版面仔细识别字段：左侧通常是头像，旁边/下方有姓名、性别、出生地点、签发地点、签发机关；中间有国籍；右侧有出生日期、签发日期、有效期至；顶端从左到右常见类型、国家码、护照号码。
+
+请以严格 JSON 输出：
+{
+  "中文名": "如果是中国人护照，输出中文姓名，例如'张三'；如果不是中文姓名或识别不到，输出 null。",
+  "姓名": "护照姓名原文；中国护照可输出中文名，外国护照输出英文/拉丁姓名。",
+  "拼音名": "中国护照请输出中文名对应拼音，首字母大写且不加空格，例如'张三'→'ZhangSan'；也可直接提取护照姓名下面的拼音。外国护照请输出护照上的英文/拉丁姓名，去掉多余空格，尽量用首字母大写格式。",
+  "姓拼音": "姓/Last name/Surname 的拼音或英文，首字母大写；识别不到则 null。",
+  "名拼音": "名/Given names 的拼音或英文，首字母大写；识别不到则 null。",
+  "护照号": "护照号码/Passport No.，通常在右上角。",
+  "出生日期": "Date of birth，输出 YYYY-MM-DD。",
+  "签发日期": "Date of issue，输出 YYYY-MM-DD。",
+  "有效期至": "Date of expiry，输出 YYYY-MM-DD。",
+  "性别": "输出'男'或'女'。若护照为 M/F，请转换为男/女。",
+  "国籍": "Nationality / 国籍。",
+  "出生地点": "Place of birth / 出生地点。",
+  "签发地点": "Place of issue / 签发地点。",
+  "签发机关": "Authority / 签发机关。"
+}
+
+只输出JSON对象，不要任何额外解释。每个字段如果识别不到，值为null。`;
+    const fields = await callVisionJson(base64Data, mimeType, prompt, "AI护照");
+    if (fields) {
+      for (const k of ["出生日期", "签发日期", "有效期至"]) {
+        if (fields[k]) fields[k] = normalizeDateLike(fields[k]);
+      }
+      if (fields.性别 === "M") fields.性别 = "男";
+      if (fields.性别 === "F") fields.性别 = "女";
+    }
+    return fields || {};
   }
 
   // AI: extract structured fields from a 营业执照 image
@@ -1092,27 +1378,70 @@ document.addEventListener("DOMContentLoaded", async () => {
       statusLog(`[AI提取] 完成（${Date.now() - t0}ms）`);
     }
 
+    // Source: AI 香港公司注册证书 CR fields
+    let aiHkCr = {};
+    const hkCrFound = result.found.find(f => f.key === "hk_business_registration");
+    if (hkCrFound && hkCrFound.imageData) {
+      statusLog(`[AI提取] 解析香港公司注册证书CR字段...`);
+      const t0 = Date.now();
+      aiHkCr = await extractHkCrFields(hkCrFound.imageData, hkCrFound.mimeType);
+      statusLog(`[AI提取] 完成（${Date.now() - t0}ms）`);
+    }
+
+    // Source: AI 护照 fields
+    let aiPassport = {};
+    const passportFound = result.found.find(f => f.key === "passport");
+    if (passportFound && passportFound.imageData) {
+      statusLog(`[AI提取] 解析护照字段...`);
+      const t0 = Date.now();
+      aiPassport = await extractPassportFields(passportFound.imageData, passportFound.mimeType);
+      statusLog(`[AI提取] 完成（${Date.now() - t0}ms）`);
+    }
+
     // 持久化原始 AI 结果，供后续 buildAutofillPlan 使用（如 姓拼音 / 名拼音 不在显示模块里）
     lastAiData = {
       license: aiLicense || {},
       idCardFront: aiIdCardFront || {},
-      idCardBack: aiIdCardBack || {}
+      idCardBack: aiIdCardBack || {},
+      hkCr: aiHkCr || {},
+      passport: aiPassport || {}
     };
 
     // Document-type label for "上传法人代表证件信息":
     // - If either side of 身份证 is detected → "法人身份证"
-    // - (passport detection not implemented yet; leave blank otherwise)
-    const idCardOrPassportLabel = (idFrontFound || idBackFound) ? "法人身份证" : "";
+    // - If passport is detected → "法人护照"
+    const idCardOrPassportLabel = (idFrontFound || idBackFound) ? "法人身份证" : (passportFound ? "法人护照" : "");
+
+    // identityFlow 驱动字段级 showIf 过滤：
+    //   "idcard"   → 只上传身份证 或 同时上传身份证+护照（优先身份证，与 identity_field 判断一致）
+    //   "passport" → 只上传护照
+    //   ""         → 都没上传 / 未知：保持现状，所有字段都显示（不过滤）
+    // 在 requirements.json 的模块字段里加 "showIf": "idcard" / "passport" 可控制该字段是否渲染；
+    // 不加 showIf 的字段永远显示（例如 identity_field 源的通用字段：中文名/拼音名/出生日期/性别）
+    const identityFlow = (idFrontFound || idBackFound) ? "idcard" : (passportFound ? "passport" : "");
 
     // Build modules
     const modulesData = [];
     for (const mod of getCurrentModules()) {
       const fields = [];
       for (const f of mod.fields) {
+        // showIf 过滤：仅当该字段声明了 showIf 且当前 identityFlow 明确不匹配时跳过。
+        // identityFlow 为空（未检测到任何证件）时不过滤，让用户看到完整字段列表。
+        if (f.showIf && identityFlow && f.showIf !== identityFlow) continue;
         let value = "";
         switch (f.source) {
           case "xlsx":
             value = getXlsxCell(sheet, f.cell);
+            // fallbackCell：主 cell 取不到值时，按声明顺序依次尝试备选 cell。
+            // 支持单个字符串（"C4"）或数组（["C4","D3"]）。用于 法国|香港 公司名称：
+            // C3 留空时回退 C4，避免 xlsx 模板里 C3/C4 哪个被填都能命中。
+            if ((!value || !value.trim()) && f.fallbackCell) {
+              const fallbacks = Array.isArray(f.fallbackCell) ? f.fallbackCell : [f.fallbackCell];
+              for (const cell of fallbacks) {
+                const v = getXlsxCell(sheet, cell);
+                if (v && v.trim()) { value = v; break; }
+              }
+            }
             break;
           case "file_path": {
             const item = result.found.find(x => x.key === f.fileKey);
@@ -1128,6 +1457,25 @@ document.addEventListener("DOMContentLoaded", async () => {
           case "ai_idcard_back":
             value = aiIdCardBack[f.aiField] != null ? String(aiIdCardBack[f.aiField]) : "";
             break;
+          case "ai_hk_cr":
+            value = aiHkCr[f.aiField] != null ? String(aiHkCr[f.aiField]) : "";
+            break;
+          case "ai_passport":
+            value = aiPassport[f.aiField] != null ? String(aiPassport[f.aiField]) : "";
+            break;
+          case "identity_field": {
+            const usingPassport = !!passportFound && !(idFrontFound || idBackFound);
+            const src = usingPassport ? aiPassport : aiIdCardFront;
+            const fieldName = usingPassport ? f.passportField : f.idField;
+            value = src && src[fieldName] != null ? String(src[fieldName]) : "";
+            break;
+          }
+          case "passport_validity": {
+            const issue = aiPassport["签发日期"] ? String(aiPassport["签发日期"]) : "";
+            const expiry = aiPassport["有效期至"] ? String(aiPassport["有效期至"]) : "";
+            value = issue && expiry ? `${issue} - ${expiry}` : (expiry || "");
+            break;
+          }
           case "postal_from_idcard_address": {
             const addr = aiIdCardFront["住址"] != null ? String(aiIdCardFront["住址"]) : "";
             value = getPostalCodeForAddress(addr);
@@ -1140,6 +1488,9 @@ document.addEventListener("DOMContentLoaded", async () => {
           }
           case "idcard_or_passport":
             value = idCardOrPassportLabel;
+            break;
+          case "xlsx_translate_to_zh":
+            value = await translateToChineseIfNeeded(getXlsxCell(sheet, f.cell));
             break;
           case "platform_from_url": {
             // 根据 基础信息表 里的店铺链接 cell 派生"主要销售平台"：
@@ -1293,6 +1644,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const result = await detectFiles(uploadedFiles, currentReqConfig);
+    // 解析 alternatives（互斥文件组，如「身份证正反面」 vs 「护照」二选一）
+    // 必须在 detectFiles 之后立即跑：会把已满足的 alt 涉及文件从 missing 里剥离，
+    // 或在没满足时改为合成单条「缺少法人证件（任选其一）」 missing 项。
+    resolveAlternatives(result, currentReqConfig?.alternatives);
     lastValidationResult = result;
 
     statusLog(`[完成] 识别 ${result.found.length} 个，缺失 ${result.missing.length} 个`);
@@ -1535,23 +1890,66 @@ document.addEventListener("DOMContentLoaded", async () => {
     return (f && f.value || "").toString().trim();
   }
 
-  // 法国|大陆 委托书：用模板 PDF + Canvas 生成的圆章合成最终文件。
+  // 委托书：用模板 PDF + Canvas 生成的圆章合成最终文件。两种章风格由 cfg.style 决定：
+  //   - "mainland"（默认）：外圈中文弧文 + 中心红色五角星（法国|大陆 / 波兰|大陆）
+  //   - "hk"             ：外圈英文弧文 + 中心多行中文方块 + 底部小蓝星（法国|香港）
   // 依赖 window.PoaComposer（annex/poa_composer.js）+ window.SealGenerator + window.PDFLib。
-  // 公司名优先级：cfg.companyName（poa-seal-area 面板传入）> cfg.companyNameFrom 指向的 lastModulesData 字段。
+  // 字段来源（优先级 cfg 覆盖 > 模块字段 fallback）：
+  //   - 中文名：cfg.companyName  > cfg.companyNameFrom 指向的 lastModulesData 字段
+  //   - 英文名：cfg.englishName  > cfg.englishNameFrom 指向的 lastModulesData 字段（仅 HK）
+  // HK 风格下中文名可为空（中心留空），但英文名必须非空（外圈必填）。mainland 反之。
   async function createPoaWithSealFile(cfg) {
     if (!window.PoaComposer) throw new Error("PoaComposer 未加载（annex/poa_composer.js）");
-    let companyName = (cfg.companyName || "").trim();
-    if (!companyName) {
+
+    const style = cfg.style || "mainland";
+
+    // 中文名：两种风格都尝试读，但只在 mainland 时强制非空。
+    // 注意区分 "cfg 没传该字段"（undefined → 走模块 fallback）和 "cfg 显式传空串"
+    // （用户在面板清空 → 尊重，不回填），否则面板清空会被公司信息模块的值覆盖。
+    let companyName;
+    if (cfg.companyName !== undefined) {
+      companyName = String(cfg.companyName).trim();
+    } else {
       const src = cfg.companyNameFrom || { module: "公司信息", field: "公司名称" };
       companyName = readModuleField(src.module, src.field);
+    }
+
+    // 英文名：仅 HK 风格需要
+    let englishName = "";
+    if (style === "hk") {
+      if (cfg.englishName !== undefined) {
+        englishName = String(cfg.englishName).trim();
+      } else {
+        const esrc = cfg.englishNameFrom || { module: "店铺信息", field: "公司英文名称" };
+        englishName = readModuleField(esrc.module, esrc.field);
+      }
+    }
+
+    // 必填校验：HK 看英文名（外圈是主体），mainland 看中文名（弧文是主体）
+    if (style === "hk") {
+      if (!englishName) {
+        const esrc = cfg.englishNameFrom || { module: "店铺信息", field: "公司英文名称" };
+        throw new Error(`委托书盖章[HK]: 未从「${esrc.module} → ${esrc.field}」取到公司英文名，请在 🔴 委托书圆章 面板手动输入，或确认 店铺信息 模块已构建`);
+      }
+    } else {
       if (!companyName) {
+        const src = cfg.companyNameFrom || { module: "公司信息", field: "公司名称" };
         throw new Error(`委托书盖章: 未从「${src.module} → ${src.field}」取到公司名，请在 🔴 委托书圆章 面板手动输入，或确认 公司信息 模块已构建`);
       }
     }
+
+    // 把 style + englishName 注入 sealOpts，PoaComposer 透传给 SealGenerator.generate
+    // 注意：cfg.sealOpts 是 placeholder 配置/面板传入的原始样式（color/ringWidth/font 等），
+    // style + englishName 在这里 覆盖（override）：避免 cfg.sealOpts 里若漏写 style 时还走 mainland。
+    const mergedSealOpts = Object.assign({}, cfg.sealOpts || {}, {
+      style,
+      englishName,
+    });
+
     const { file } = await window.PoaComposer.compose(companyName, {
       filename: cfg.filename || "委托书盖章_自动生成.pdf",
       sealBox: cfg.sealBox,        // 红框坐标
-      sealOpts: cfg.sealOpts,      // 章样式
+      sealOpts: mergedSealOpts,    // 章样式 + style/englishName 路由
     });
     return file;
   }
@@ -1624,6 +2022,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       placeholder: true
     });
     lastValidationResult.missing = lastValidationResult.missing.filter(m => m.key !== key);
+    // 重新解析 alternatives：占位文件落入 found 后可能改变互斥组的满足状态
+    // （目前 alt 文件如 id_card / passport 没有 placeholder，但保持幂等更安全）。
+    resolveAlternatives(lastValidationResult, currentReqConfig?.alternatives);
 
     statusLog(`[占位] 已生成 ${displayLabel} → ${file.name}（${file.size} 字节）`);
 
@@ -2438,43 +2839,127 @@ document.addEventListener("DOMContentLoaded", async () => {
       return { ok: true, msg: `已选 "${target}"` };
     }
 
+    // 通用点击：先按 selector 收候选，可选用 item.textContent 在候选中再筛文本（忽略空白差异，
+    // 例如页面 "确 定" 中间有空格，传 "确定" 也能命中）。用于"切注册地→点确定→等表单重渲染"
+    // 这类结构性预操作。可选 waitForSelector 轮询等异步重挂载完成；postDelay 默认 300ms 兜底。
+    async function handleClick(item) {
+      const selector = item.selector;
+      if (!selector) return { ok: false, error: "缺少 selector" };
+
+      const all = Array.from(document.querySelectorAll(selector));
+      const visible = all.filter(isVisible);
+      const pool = visible.length > 0 ? visible : all;
+      if (pool.length === 0) {
+        return { ok: false, error: `未找到 selector="${selector}"` };
+      }
+
+      let hit;
+      if (item.textContent) {
+        const stripSpace = (s) => String(s || "").replace(/\s+/g, "");
+        const want = stripSpace(item.textContent);
+        hit = pool.find((el) => stripSpace(el.textContent).includes(want));
+        if (!hit) {
+          const seen = pool
+            .map((el) => `"${(el.textContent || "").trim().substring(0, 24)}"`)
+            .join(", ");
+          return {
+            ok: false,
+            error:
+              `selector="${selector}" 命中 ${pool.length} 个，但无一含文本 "${item.textContent}"。候选: [${seen}]`,
+          };
+        }
+      } else {
+        hit = pool[0];
+      }
+
+      // skipIfHasClass：点之前先看匹配到的元素是不是已经处于目标状态（如卡片的 "active" class）。
+      // 若已处于目标态就跳过不再点击，避免把已选中的选项点一次反而取消选中。
+      if (item.skipIfHasClass && hit.classList.contains(item.skipIfHasClass)) {
+        const label = (hit.textContent || selector).trim().substring(0, 24);
+        return { ok: true, skipped: true, msg: `"${label}" 已有 class="${item.skipIfHasClass}"，跳过点击` };
+      }
+
+      hit.click();
+      highlight(hit);
+
+      // 可选：轮询等指定 selector 出现（点完后通常会有 Vue 异步重挂载）
+      if (item.waitForSelector) {
+        const timeout = typeof item.waitTimeout === "number" ? item.waitTimeout : 3000;
+        const deadline = Date.now() + timeout;
+        while (Date.now() < deadline) {
+          const tgt = document.querySelector(item.waitForSelector);
+          if (tgt && isVisible(tgt)) break;
+          await sleep(80);
+        }
+      }
+
+      // 兜底等待（默认 300ms）—— 让 Vue 等异步流程稳定
+      const postDelay = typeof item.postDelay === "number" ? item.postDelay : 300;
+      if (postDelay > 0) await sleep(postDelay);
+
+      const label = (hit.textContent || selector).trim().substring(0, 24);
+      return { ok: true, msg: `已点击 "${label}"` };
+    }
+
     // ----- Run plan -----
-    // 四个阶段：
-    //   Phase 0 (PRE, 串行): radio —— 先选证件类型/性别/国籍等，因为某些 radio 会改变后续表单结构
+    // 五个阶段：
+    //   Phase 0 (PRE_CLICK, 串行): click —— 结构性预点击（如切注册地"香港公司"→点"确定"），
+    //                      触发 Vue 重渲染。每个 click 自带 postDelay / waitForSelector 控制等待时间，
+    //                      跑完整批后额外等 300ms 让任何遗漏的异步流程稳定。
+    //   Phase 1 (PRE, 串行): radio —— 选证件类型/性别/国籍等，因为某些 radio 会改变后续表单结构
     //                      （例：证件类型从"法人护照"切到"法人身份证"会重新挂载身份证上传/中文名等输入）
-    //                      跑完后等 Vue 完成可能的重渲染再进入 Phase 1
-    //   Phase 1 (INSTANT, 并发): text + fileById —— 输入框赋值 + 上传 PDF 都是非弹窗、互不干扰
-    //   Phase 2 (POPUP, 串行): datepicker / businessTerm / cascader / select —— 共享 antd 浮层，必须串行
-    //   Phase 3 (POST, 串行): 带 afterPopup:true 标记的 item —— 依赖 Phase 2 副作用的字段
+    //                      跑完后等 Vue 完成可能的重渲染再进入 Phase 2
+    //   Phase 2 (INSTANT, 并发): text + fileById —— 输入框赋值 + 上传 PDF 都是非弹窗、互不干扰
+    //   Phase 3 (POPUP, 串行): datepicker / businessTerm / cascader / select —— 共享 antd 浮层，必须串行
+    //   Phase 4 (POST, 串行): 带 afterPopup:true 标记的 item —— 依赖 Phase 3 副作用的字段
     //                      （例：身份证邮编必须在 身份证地址 cascader 选完之后填，否则会被 cascader 的
     //                      change 事件联动清空）
+    const PRE_CLICK = new Set(["click"]);
     const PRE = new Set(["radio"]);
     const INSTANT = new Set(["text", "fileById"]);
     const keyOf = (item) => item.key || item.placeholder || item.fieldId || item.type;
 
     async function runOne(item) {
       try {
+        let result;
         switch (item.type) {
-          case "text": return await handleText(item);
-          case "fileById": return await handleFile(item);
-          case "datepicker": return await handleDatepicker(item);
-          case "businessTerm": return await handleBusinessTerm(item);
-          case "cascader": return await handleCascader(item);
-          case "select": return await handleSelect(item);
-          case "radio": return await handleRadio(item);
-          default: return { ok: false, error: `未知类型 ${item.type}` };
+          case "click": result = await handleClick(item); break;
+          case "text": result = await handleText(item); break;
+          case "fileById": result = await handleFile(item); break;
+          case "datepicker": result = await handleDatepicker(item); break;
+          case "businessTerm": result = await handleBusinessTerm(item); break;
+          case "cascader": result = await handleCascader(item); break;
+          case "select": result = await handleSelect(item); break;
+          case "radio": result = await handleRadio(item); break;
+          default: result = { ok: false, error: `未知类型 ${item.type}` };
         }
+        if (item.optional && result && !result.ok) {
+          return { ok: true, skipped: true, msg: result.error || "可选项未命中，跳过" };
+        }
+        return result;
       } catch (e) {
+        if (item.optional) {
+          return { ok: true, skipped: true, msg: e?.message || "可选项异常，跳过" };
+        }
         return { ok: false, error: e?.message || String(e) };
       }
     }
 
+    const preClickItems = plan.filter((it) => !it.afterPopup && PRE_CLICK.has(it.type));
     const preItems = plan.filter((it) => !it.afterPopup && PRE.has(it.type));
-    const instantItems = plan.filter((it) => !it.afterPopup && !PRE.has(it.type) && INSTANT.has(it.type));
-    const popupItems = plan.filter((it) => !it.afterPopup && !PRE.has(it.type) && !INSTANT.has(it.type));
+    const instantItems = plan.filter((it) => !it.afterPopup && !PRE_CLICK.has(it.type) && !PRE.has(it.type) && INSTANT.has(it.type));
+    const popupItems = plan.filter((it) => !it.afterPopup && !PRE_CLICK.has(it.type) && !PRE.has(it.type) && !INSTANT.has(it.type));
     const postItems = plan.filter((it) => it.afterPopup);
 
-    // Phase 0: 串行——结构性 radio（如证件类型）。完成后多等 400ms 让 Vue 重渲染挂载新增 input/upload box
+    // Phase 0: 串行——结构性预点击（如切注册地）。每个 click 已自带 postDelay，整批跑完再等 300ms。
+    const preClickResults = [];
+    for (const item of preClickItems) {
+      const r = await runOne(item);
+      preClickResults.push({ key: keyOf(item), ...r });
+    }
+    if (preClickItems.length > 0) await sleep(300);
+
+    // Phase 1: 串行——结构性 radio（如证件类型）。完成后多等 400ms 让 Vue 重渲染挂载新增 input/upload box
     const preResults = [];
     for (const item of preItems) {
       const r = await runOne(item);
@@ -2483,12 +2968,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (preItems.length > 0) await sleep(400);
 
-    // Phase 1: 瞬间并发——文本输入与文件上传
+    // Phase 2: 瞬间并发——文本输入与文件上传
     const instantResults = await Promise.all(
       instantItems.map(async (item) => ({ key: keyOf(item), ...(await runOne(item)) }))
     );
 
-    // Phase 2: 串行——日期、营业期限、级联（共享单一弹窗面板）
+    // Phase 3: 串行——日期、营业期限、级联（共享单一弹窗面板）
     const popupResults = [];
     for (const item of popupItems) {
       const r = await runOne(item);
@@ -2496,7 +2981,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       await sleep(120);
     }
 
-    // Phase 3: 串行——afterPopup 标记的后置字段（例：身份证邮编须在 cascader 选完后填）
+    // Phase 4: 串行——afterPopup 标记的后置字段（例：身份证邮编须在 cascader 选完后填）
     // cascader 选完后 Vue 可能还在同步 state；多等 200ms 再填，避免被 change 事件清掉
     if (postItems.length > 0) await sleep(200);
     const postResults = [];
@@ -2508,7 +2993,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // 保持原 plan 顺序输出结果，方便用户对照
     const byKey = new Map();
-    for (const r of [...preResults, ...instantResults, ...popupResults, ...postResults]) byKey.set(r.key, r);
+    for (const r of [...preClickResults, ...preResults, ...instantResults, ...popupResults, ...postResults]) byKey.set(r.key, r);
     const results = plan.map((item) => byKey.get(keyOf(item)) || { key: keyOf(item), ok: false, error: "未执行" });
 
     return { results };
@@ -2812,8 +3297,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       modulesData: lastModulesData,
       foundFiles: lastValidationResult?.found || [],
       aiData: lastAiData,
+      // 当前组合 key（"<国家>|<注册地>"），积木里可据此走条件分支
+      // （例：france_seller_center 在 France|HongKong 下需先点"香港公司"→"确定"切表单）
+      combinationKey: `${countrySelect.value}|${registrationSelect.value}`,
       utils: {
         splitAddressIntoRegionAndDetail,
+        splitHkAddressIntoRegionAndDetail,
         imageFileToPdfBlob,
         buildSinglePagePdfFromJpeg,
         fileToBase64Plain,
@@ -3013,28 +3502,86 @@ document.addEventListener("DOMContentLoaded", async () => {
   let poaSealInputTimer = null;
 
   // 读取当前面板上的全部参数 —— 章颜色、字号、弧线跨度的 "自适应" 用 0 表示。
+  // style 字段（mainland/hk）通过隐藏 input 跟踪：showPoaSealPanel 根据 placeholder 配置写入。
+  // englishName 字段仅 HK 模式下可见的输入框（hidden 时取空）；会随 sealOpts 一起塞给 generator。
+  //
+  // 两种 style 的可调参数不完全一样：
+  //   mainland: 外圈粗细 + 五角星比例 + 字体下拉
+  //   hk      : 外 / 次外 / 内 三条线粗细 + 底部文本 + 底部字号；字体固定（英文宋体不加粗、中文宋体加粗）
   function readPoaSealParams() {
     const $ = (id) => document.getElementById(id);
     const num = (id) => parseFloat($(id).value);
     const arcDeg = num("poa-seal-arc");
     const fontSize = num("poa-seal-fontsize");
+    const styleEl = $("poa-seal-style");
+    const style = (styleEl && styleEl.value) || "mainland";
+    const enEl = $("poa-seal-english");
+    const englishName = (enEl && enEl.value || "").trim();
+
+    // mainland 分支：沿用原有字段
+    if (style !== "hk") {
+      return {
+        companyName: ($("poa-seal-company").value || "").trim(),
+        englishName,
+        style,
+        sealBox: {
+          centerX: num("poa-seal-cx"),
+          centerY: num("poa-seal-cy"),
+          diameter: num("poa-seal-diameter"),
+        },
+        sealOpts: {
+          size: 600,
+          color: $("poa-seal-color").value,
+          ringWidth: num("poa-seal-ring"),
+          textRadiusRatio: num("poa-seal-trr"),
+          starRatio: num("poa-seal-star"),
+          arcSpan: arcDeg ? (arcDeg * Math.PI / 180) : 0,
+          fontSize: fontSize || 0,
+          font: $("poa-seal-font").value,
+          fontBold: true,
+          style,
+          englishName,
+        },
+      };
+    }
+
+    // HK 分支：三条边线 + 底部文本（替代五角星） + 固定字体（英文不加粗 / 中文加粗）
+    const bottomFs = num("poa-seal-bottom-fontsize");
+    // 中心中文名归一化：当公司中文名为空，或与英文名一致（如公司本身就是纯英文名，
+    // xlsx 里"公司名称"和"公司英文名称"被填了同一串），则中心留空，只画外圈英文。
+    const rawCompany = ($("poa-seal-company").value || "").trim();
+    const norm = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
+    const sameAsEnglish = rawCompany && englishName && norm(rawCompany) === norm(englishName);
+    const effectiveCompany = sameAsEnglish ? "" : rawCompany;
     return {
-      companyName: ($("poa-seal-company").value || "").trim(),
+      companyName: effectiveCompany,
+      englishName,
+      style,
       sealBox: {
         centerX: num("poa-seal-cx"),
         centerY: num("poa-seal-cy"),
         diameter: num("poa-seal-diameter"),
       },
       sealOpts: {
-        size: 600,                              // PNG 像素分辨率（嵌入 PDF 时按 diameter 缩放）
+        size: 600,
         color: $("poa-seal-color").value,
         ringWidth: num("poa-seal-ring"),
+        secondaryRingWidth: num("poa-seal-ring2"),
+        innerRingWidth: num("poa-seal-ring3"),
         textRadiusRatio: num("poa-seal-trr"),
-        starRatio: num("poa-seal-star"),
         arcSpan: arcDeg ? (arcDeg * Math.PI / 180) : 0,
         fontSize: fontSize || 0,
-        font: $("poa-seal-font").value,
+        // 中心中文：宋体加粗（固定，不开放字体选择）
+        font: '"SimSun","宋体","STSong","NSimSun",serif',
         fontBold: true,
+        // 外圈英文：宋体不加粗（固定）
+        enFont: '"SimSun","宋体","STSong","NSimSun",serif',
+        enFontBold: false,
+        // 底部文本（替代 mainland 的五角星）
+        bottomText: ($("poa-seal-bottom-text").value || "").trim(),
+        bottomFontSize: bottomFs || 0,
+        style,
+        englishName,
       },
     };
   }
@@ -3056,6 +3603,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const opts = (cfg && cfg.sealOpts) || {};
     if (opts.color !== undefined) { $("poa-seal-color").value = opts.color; $("poa-seal-color-val").textContent = opts.color; }
     if (opts.ringWidth !== undefined) setRange("poa-seal-ring", "poa-seal-ring-val", opts.ringWidth);
+    // HK 专属：次外圈 / 内圈 / 底部文本 / 底部字号
+    if (opts.secondaryRingWidth !== undefined) setRange("poa-seal-ring2", "poa-seal-ring2-val", opts.secondaryRingWidth);
+    if (opts.innerRingWidth !== undefined) setRange("poa-seal-ring3", "poa-seal-ring3-val", opts.innerRingWidth);
+    if (opts.bottomText !== undefined) {
+      const el = $("poa-seal-bottom-text"); if (el) el.value = opts.bottomText;
+    }
+    if (opts.bottomFontSize !== undefined) {
+      setRange("poa-seal-bottom-fontsize", "poa-seal-bottom-fontsize-val", opts.bottomFontSize, (v) => v == 0 ? "自适应" : v + "px");
+    }
     if (opts.textRadiusRatio !== undefined) setRange("poa-seal-trr", "poa-seal-trr-val", opts.textRadiusRatio);
     if (opts.starRatio !== undefined) setRange("poa-seal-star", "poa-seal-star-val", opts.starRatio);
     if (opts.arcSpan !== undefined) {
@@ -3083,19 +3639,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     const params = readPoaSealParams();
     const pctx = previewCanvas.getContext("2d");
     pctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    if (!params.companyName) {
-      info.textContent = "请输入公司中文名";
+    // HK 风格的主文本是外圈英文名（中文名可空）；mainland 是中文弧文（必填）
+    const mainText = params.style === "hk" ? params.englishName : params.companyName;
+    if (!mainText) {
+      info.textContent = params.style === "hk"
+        ? "请输入公司英文名（中文名可空 → 中心留空）"
+        : "请输入公司中文名";
       info.style.color = "#94a3b8";
       lastPoaSealBlob = null;
       return;
     }
     try {
+      // generate(name, opts): mainland 用 name 作弧文，HK 用 name 作中心中文（可空），
+      // 英文名走 opts.englishName。两种风格统一从 params.companyName 进，由 sealOpts.style 分流。
       const { canvas } = window.SealGenerator.generate(params.companyName, params.sealOpts);
       // 缩放到预览 canvas 大小
       pctx.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height);
       lastPoaSealBlob = await new Promise((res) => canvas.toBlob((b) => res(b), "image/png"));
       const sizeKb = lastPoaSealBlob ? (lastPoaSealBlob.size / 1024).toFixed(1) : "?";
-      info.textContent = `${params.companyName} · 输出 ${params.sealOpts.size}px · ${sizeKb}KB · 嵌入直径 ${params.sealBox.diameter}pt (≈ ${(params.sealBox.diameter / 72 * 25.4).toFixed(1)}mm)`;
+      const label = params.style === "hk"
+        ? `${params.englishName}${params.companyName ? ` · 中心 "${params.companyName}"` : " · 中心留空"}`
+        : params.companyName;
+      info.textContent = `${label} · 输出 ${params.sealOpts.size}px · ${sizeKb}KB · 嵌入直径 ${params.sealBox.diameter}pt (≈ ${(params.sealBox.diameter / 72 * 25.4).toFixed(1)}mm)`;
       info.style.color = "";
     } catch (e) {
       info.textContent = "章渲染失败: " + (e.message || e);
@@ -3119,7 +3684,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const params = readPoaSealParams();
-    if (!params.companyName) {
+    // HK 风格必填英文名（中文可空），mainland 必填中文名
+    if (params.style === "hk") {
+      if (!params.englishName) {
+        status.textContent = "请先填写公司英文名（香港样式必填，会绕外圈一周）";
+        status.style.color = "#dc2626";
+        return;
+      }
+    } else if (!params.companyName) {
       status.textContent = "请先填写公司中文名";
       status.style.color = "#dc2626";
       return;
@@ -3136,6 +3708,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         force: true,
         overrides: {
           companyName: params.companyName,
+          // HK 风格走 createPoaWithSealFile 的 cfg.englishName / cfg.style 入口，
+          // 透传到 sealOpts 后由 SealGenerator.generate 分流到 renderHK
+          englishName: params.englishName,
+          style: params.style,
           sealBox: params.sealBox,
           sealOpts: params.sealOpts,
         },
@@ -3198,6 +3774,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     bindLive("poa-seal-cy", "poa-seal-cy-val");
     bindLive("poa-seal-color", "poa-seal-color-val");
     bindLive("poa-seal-ring", "poa-seal-ring-val");
+    // HK 专属：次外圈、内圈、底部文本字号
+    bindLive("poa-seal-ring2", "poa-seal-ring2-val");
+    bindLive("poa-seal-ring3", "poa-seal-ring3-val");
+    bindLive("poa-seal-bottom-fontsize", "poa-seal-bottom-fontsize-val", (v) => v == 0 ? "自适应" : v + "px");
     bindLive("poa-seal-trr", "poa-seal-trr-val");
     bindLive("poa-seal-star", "poa-seal-star-val");
     bindLive("poa-seal-arc", "poa-seal-arc-val", (v) => v == 0 ? "自适应" : v + "°");
@@ -3206,6 +3786,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(poaSealInputTimer);
       poaSealInputTimer = setTimeout(renderPoaSealPreview, 0);
     });
+    // 底部文本是 text input，用 input 事件监听
+    const bottomTextEl = $("poa-seal-bottom-text");
+    if (bottomTextEl) {
+      bottomTextEl.addEventListener("input", () => {
+        clearTimeout(poaSealInputTimer);
+        poaSealInputTimer = setTimeout(renderPoaSealPreview, 120);
+      });
+    }
 
     // 公司名输入：标记"用户已手动编辑"，避免后续 showPoaSealPanel 二次覆盖
     $("poa-seal-company").addEventListener("input", (e) => {
@@ -3213,15 +3801,47 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(poaSealInputTimer);
       poaSealInputTimer = setTimeout(renderPoaSealPreview, 200);
     });
+    // 公司英文名输入（HK 风格独有，mainland 时输入框 display:none）：同样用 userEdited 锁
+    const enInput = $("poa-seal-english");
+    if (enInput) {
+      enInput.addEventListener("input", (e) => {
+        e.target.dataset.userEdited = "1";
+        clearTimeout(poaSealInputTimer);
+        poaSealInputTimer = setTimeout(renderPoaSealPreview, 200);
+      });
+    }
 
     // 「↺ 恢复默认」按钮：清掉用户调整，按 requirements.json 的 placeholder 配置重置
     $("poa-seal-reset").addEventListener("click", () => {
-      // 先把 UI 全部回到 HTML 里的 value="..."（即 SEAL_BOX_DEFAULT 同步过来的预设）
-      const defaults = {
+      const styleEl = $("poa-seal-style");
+      const style = (styleEl && styleEl.value) || "mainland";
+
+      // 通用字段默认值（两种 style 都有）
+      const common = {
         "poa-seal-diameter": 150, "poa-seal-cx": 408, "poa-seal-cy": 219,
-        "poa-seal-color": "#c62828", "poa-seal-ring": 8, "poa-seal-trr": 0.8,
-        "poa-seal-star": 0.39, "poa-seal-arc": 300, "poa-seal-fontsize": 86,
       };
+      // style 专属默认值
+      const styleDefaults = style === "hk"
+        ? {
+            "poa-seal-color": "#333366",     // rgba(51,51,102,1)
+            "poa-seal-ring": 17,
+            "poa-seal-ring2": 8,
+            "poa-seal-ring3": 8,
+            "poa-seal-trr": 0.79,
+            "poa-seal-arc": 246,
+            "poa-seal-fontsize": 77,
+            "poa-seal-bottom-fontsize": 100,
+          }
+        : {
+            "poa-seal-color": "#c62828",
+            "poa-seal-ring": 8,
+            "poa-seal-trr": 0.8,
+            "poa-seal-star": 0.39,
+            "poa-seal-arc": 300,
+            "poa-seal-fontsize": 86,
+          };
+      const defaults = Object.assign({}, common, styleDefaults);
+
       for (const [id, v] of Object.entries(defaults)) {
         const el = $(id);
         if (!el) continue;
@@ -3229,11 +3849,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         const valEl = $(id + "-val");
         if (valEl) {
           if (id === "poa-seal-arc") valEl.textContent = v == 0 ? "自适应" : v + "°";
-          else if (id === "poa-seal-fontsize") valEl.textContent = v == 0 ? "自适应" : v + "px";
+          else if (id === "poa-seal-fontsize" || id === "poa-seal-bottom-fontsize") valEl.textContent = v == 0 ? "自适应" : v + "px";
           else valEl.textContent = v;
         }
       }
-      $("poa-seal-font").selectedIndex = 0;
+      // 底部文本回默认 "*"
+      const bottomTextEl = $("poa-seal-bottom-text");
+      if (bottomTextEl) bottomTextEl.value = "*";
+      // 字体下拉只在 mainland 生效
+      const fontEl = $("poa-seal-font");
+      if (fontEl) fontEl.selectedIndex = 0;
+
       // 再用 requirements.json 的 cfg 覆盖（如果配过 sealBox/sealOpts）
       applyPoaSealConfigToPanel(getPlaceholderConfig("power_of_attorney"));
       renderPoaSealPreview();
@@ -3255,15 +3881,82 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     area.style.display = "";
-    // 用 requirements.json 里 cfg 的 sealBox/sealOpts 覆盖面板（如果有）
+
+    // 章风格路由：requirements.json 在组合 placeholder 上声明 "style": "hk" / "mainland"。
+    // 没写 = mainland（向后兼容）。HK 模式下面板会显示「公司英文名」输入框。
+    const style = cfg.style || "mainland";
+    const styleEl = document.getElementById("poa-seal-style");
+    if (styleEl) styleEl.value = style;
+    const enRow = document.getElementById("poa-seal-english-row");
+    if (enRow) enRow.style.display = (style === "hk") ? "" : "none";
+    // HK 专属控件（次/内边线、底部文本、底部字号）与 mainland 专属控件（五角星、字体下拉）
+    // 在同一个 grid 里交替显示。grid 的 "label+input+val" 三列一组。
+    const hkOnly = document.querySelectorAll(".poa-seal-hk-only");
+    const mainlandOnly = document.querySelectorAll(".poa-seal-mainland-only");
+    hkOnly.forEach((el) => { el.style.display = (style === "hk") ? "" : "none"; });
+    mainlandOnly.forEach((el) => { el.style.display = (style === "hk") ? "none" : ""; });
+
+    // HK 下：若面板当前还是 mainland 的默认值（红色 / ring=8 / star=0.39 / fontSize=86），
+    // 切到 HK 时把 UI 设回 HK 的合理默认，避免用户看到"红章+全黑大字"这种诡异过渡形态。
+    // 用户已经手动改过？通过 color 是否还是 #c62828 来粗判——过得去即可。
+    if (style === "hk") {
+      const colorEl = document.getElementById("poa-seal-color");
+      if (colorEl && colorEl.value.toLowerCase() === "#c62828") {
+        colorEl.value = "#333366";
+        const cv = document.getElementById("poa-seal-color-val"); if (cv) cv.textContent = "#333366";
+      }
+      // 从 mainland 默认值切到 HK 默认值：只在当前值确实是 mainland 的默认时替换，
+      // 否则认为是用户已经手动调过（或前一次 HK 留下的值），不动。
+      const setIfDefault = (id, valId, mainlandDefault, hkDefault, fmt) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (parseFloat(el.value) === mainlandDefault) {
+          el.value = hkDefault;
+          const v = document.getElementById(valId);
+          if (v) v.textContent = fmt ? fmt(hkDefault) : hkDefault;
+        }
+      };
+      setIfDefault("poa-seal-ring", "poa-seal-ring-val", 8, 17);
+      setIfDefault("poa-seal-trr", "poa-seal-trr-val", 0.8, 0.79);
+      setIfDefault("poa-seal-arc", "poa-seal-arc-val", 300, 246, (v) => v == 0 ? "自适应" : v + "°");
+      setIfDefault("poa-seal-fontsize", "poa-seal-fontsize-val", 86, 77, (v) => v == 0 ? "自适应" : v + "px");
+    }
+
+    const titleEl = area.querySelector(".poa-seal-title");
+    if (titleEl) {
+      titleEl.textContent = style === "hk"
+        ? "🔵 委托书圆章 + 盖章（香港样式：外圈英文 + 中心中文）"
+        : "🔴 委托书圆章 + 盖章";
+    }
+
+    // 用 requirements.json 里 cfg 的 sealBox/sealOpts 覆盖面板（如果有）。
+    // HK 组合一般会在配置里把 color 默认成深蓝（#1e3a8a）。
     applyPoaSealConfigToPanel(cfg);
 
-    // 公司名：从 lastModulesData 取，仅当用户没改过时回填
+    // 公司中文名：从 lastModulesData 取，仅当用户没改过时回填（mainland/HK 都尝试，HK 时可为空）
     const companyInput = document.getElementById("poa-seal-company");
     const src = cfg.companyNameFrom || { module: "公司信息", field: "公司名称" };
     const company = readModuleField(src.module, src.field);
-    if (company && companyInput.dataset.userEdited !== "1") {
-      companyInput.value = company;
+    if (companyInput.dataset.userEdited !== "1") {
+      // HK 模式下：即使取到空也要清空输入框（避免上一次 mainland 残留），让用户看到"中心留空"
+      // mainland 模式下：仅当取到非空才覆盖（保持原行为，避免清掉用户输入）
+      if (style === "hk") {
+        companyInput.value = company || "";
+      } else if (company) {
+        companyInput.value = company;
+      }
+    }
+
+    // 公司英文名（HK 专属）：从 cfg.englishNameFrom 取，默认 店铺信息 → 公司英文名称
+    if (style === "hk") {
+      const enInput = document.getElementById("poa-seal-english");
+      if (enInput) {
+        const esrc = cfg.englishNameFrom || { module: "店铺信息", field: "公司英文名称" };
+        const en = readModuleField(esrc.module, esrc.field);
+        if (en && enInput.dataset.userEdited !== "1") {
+          enInput.value = en;
+        }
+      }
     }
 
     // 等字体加载（系统宋体一般直接 ready）
@@ -3294,6 +3987,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   //   2) lastAiData.idCardFront.拼音名（驼峰拼接，例如 "ZhangSan"）
   //   3) lastAiData 的 姓拼音 + " " + 名拼音
   // 任意一级有值即返回；都拿不到则返回 ""，由调用方决定是否兜底 "Zhang San"
+  //
+  // 拼音归一化：AI 偶尔会把拼音输出成全大写（"WANGJINPING"）或全小写（"wangjinping"），
+  // 我们要求签名按"首字母大写其余小写"的驼峰显示（"WangJinPing"）。
+  // 规则：一段连续 ASCII 字母序列，若全大写或全小写，则保留第 1 个字母大写、其余强制小写；
+  //       若已是混合大小写（如 "WangJinPing"）则维持原样，避免把正确的驼峰切坏。
+  //       空格 / 连字符 / 数字等分隔符不处理。
+  function normalizePinyinCamel(raw) {
+    if (!raw) return "";
+    return String(raw).replace(/[A-Za-z]+/g, (word) => {
+      if (/^[A-Z]+$/.test(word) || /^[a-z]+$/.test(word)) {
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      }
+      return word; // 混合大小写视为正确驼峰
+    });
+  }
+
   function getLegalPersonPinyinDefault() {
     // 1) 模块里展示给用户的字段（buildModuleData 之后才有）
     if (Array.isArray(lastModulesData)) {
@@ -3301,16 +4010,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       const pinyinField = repModule && repModule.fields &&
         repModule.fields.find((f) => f.key === "法人/个人代表拼音名（英文名）");
       const v = (pinyinField && pinyinField.value || "").trim();
-      if (v) return v;
+      if (v) return normalizePinyinCamel(v);
     }
     // 2) AI 原始驼峰拼音
     const front = (lastAiData && lastAiData.idCardFront) || {};
     const full = (front.拼音名 || "").trim();
-    if (full) return full;
+    if (full) return normalizePinyinCamel(full);
     // 3) 姓 + 名 拼接（兜底）
     const surname = (front.姓拼音 || "").trim();
     const given = (front.名拼音 || "").trim();
-    if (surname || given) return [surname, given].filter(Boolean).join(" ");
+    if (surname || given) return [surname, given].filter(Boolean).map(normalizePinyinCamel).join(" ");
     return "";
   }
 
@@ -3892,6 +4601,71 @@ document.addEventListener("DOMContentLoaded", async () => {
     return { found, missing, extra };
   }
 
+  // ============================================================================
+  // Alternatives 解析：互斥文件组（如「身份证正反面」 vs 「护照」二选一）
+  // ============================================================================
+  // 配置见 requirements.json `alternatives` 字段：每条 alt 列出多个 option，
+  // 每个 option 是一组 fileKeys（必须全部识别才算该 option 满足）。
+  // 处理规则：
+  //   1. 任一 option 完整满足 → 视为 alt 满足，把 alt 涉及的所有 fileKey 从 missing
+  //      中剥离（多余 option 的文件不再算"必填"）；
+  //   2. 没有任何 option 完整满足 → 同样把 alt 涉及的所有 fileKey 从 missing 剥离，
+  //      改为合成单条 missing 项 { _alternative: true, _progress: [...] }，由
+  //      renderMissingItems 单独渲染成「缺少法人证件（任选其一）：身份证 (1/2) 或 护照 (0/1)」。
+  // 该函数应**幂等**：先剥离上一轮添加的 _alternative 合成项，再重新计算追加，
+  // 这样 applyPlaceholder / 多次 runValidation 重复调用不会堆积重复条目。
+  // ============================================================================
+  function resolveAlternatives(result, alternatives) {
+    if (!result || !Array.isArray(result.missing)) return result;
+    // 不论入参是否合法，先剥离历史合成项，避免幂等性破坏
+    result.missing = result.missing.filter(m => !m._alternative);
+    if (!Array.isArray(alternatives) || alternatives.length === 0) return result;
+
+    const foundKeys = new Set((result.found || []).map(f => f.key));
+
+    for (const alt of alternatives) {
+      if (!alt || !Array.isArray(alt.options) || alt.options.length === 0) continue;
+
+      // 把该 alt 涉及的所有 fileKey 收成一个集合（用于 missing 剥离）
+      const allKeysInAlt = new Set();
+      for (const opt of alt.options) {
+        for (const k of (opt.fileKeys || [])) allKeysInAlt.add(k);
+      }
+
+      // 任一 option fileKeys 全命中 → 视为已满足
+      const satisfiedOption = alt.options.find(opt =>
+        Array.isArray(opt.fileKeys) && opt.fileKeys.length > 0 &&
+        opt.fileKeys.every(k => foundKeys.has(k))
+      );
+
+      // 不论是否满足，先把 alt 涉及的所有真实 fileKey 从 missing 剥离
+      // （未满足时改用合成项展示，避免 missing 列表里同时出现 3 个相互排斥的零散项）
+      result.missing = result.missing.filter(m => !allKeysInAlt.has(m.key));
+
+      if (satisfiedOption) {
+        statusLog(`[alternatives] ${alt.label} → 已满足（${satisfiedOption.label}）`);
+        continue;
+      }
+
+      // 未满足：合成单条 missing，附带各 option 进度信息供 UI 展示
+      const progress = alt.options.map(opt => ({
+        label: opt.label,
+        found: (opt.fileKeys || []).filter(k => foundKeys.has(k)).length,
+        total: (opt.fileKeys || []).length
+      }));
+      result.missing.push({
+        key: alt.key,
+        label: alt.label,
+        required: true,
+        _alternative: true,
+        _progress: progress
+      });
+      statusLog(`[alternatives] ${alt.label} → 未满足（${progress.map(p => `${p.label} ${p.found}/${p.total}`).join(' 或 ')}）`);
+    }
+
+    return result;
+  }
+
   function renderDetectionResults(result) {
     const container = document.getElementById("detection-list");
     container.innerHTML = "";
@@ -3935,6 +4709,25 @@ document.addEventListener("DOMContentLoaded", async () => {
     missing.forEach(item => {
       const el = document.createElement("div");
       el.className = "missing-item";
+
+      // alternatives 合成项（互斥文件组未满足）：单独一行渲染「任选其一 + 各 option 进度」。
+      // 不挂占位按钮（个体文件没法当一组凑齐；用户应直接补传缺失文件）。
+      if (item._alternative) {
+        const optionsHtml = (item._progress || []).map(p => {
+          const ok = p.found > 0 && p.found === p.total;
+          const partial = p.found > 0 && p.found < p.total;
+          const color = ok ? "#0f172a" : (partial ? "#b45309" : "#94a3b8");
+          return `<span style="color:${color}">${escapeHtml(p.label)} (${p.found}/${p.total})</span>`;
+        }).join(' <span style="color:#cbd5e1">或</span> ');
+        el.innerHTML = `
+          <span class="missing-icon">✗</span>
+          <span class="missing-label">缺少${escapeHtml(item.label)}（任选其一）：${optionsHtml}</span>
+          <span class="missing-badge">必填</span>
+        `;
+        container.appendChild(el);
+        return;
+      }
+
       const placeholderCfg = getPlaceholderConfig(item.key);
       // 委托书盖章 (kind=poa_with_seal) 不再走"📎 生成临时占位"通道：下方专门的
       // 「🔴 委托书圆章 + 盖章」面板已经能合成带章 PDF，再放一个生成临时占位按钮反而冗余
@@ -4075,3 +4868,163 @@ document.addEventListener("DOMContentLoaded", async () => {
     setupTabs._show("config");
   }
 });
+;(() => {
+  const LEGAL_REP_ID_CARD_TEXT = "法人代表身份证";
+  const HIDDEN_ATTR = "data-pltool-hidden-legal-rep-id";
+
+  const normalizeText = (value) => String(value || "").replace(/\s+/g, "");
+
+  const getSelectedContextText = () => {
+    if (typeof document === "undefined") return "";
+
+    return Array.from(
+      document.querySelectorAll(
+        [
+          "select",
+          "input",
+          "textarea",
+          "[role='combobox']",
+          "[aria-selected='true']",
+          "[data-selected='true']",
+          ".selected",
+          ".active",
+        ].join(",")
+      )
+    )
+      .map((element) => {
+        const tagName = element.tagName ? element.tagName.toLowerCase() : "";
+
+        if (tagName === "select") {
+          return Array.from(element.selectedOptions || [])
+            .map((option) => `${option.textContent || ""} ${option.value || ""}`)
+            .join(" ");
+        }
+
+        if (tagName === "input") {
+          const type = (element.type || "").toLowerCase();
+          if ((type === "checkbox" || type === "radio") && !element.checked) {
+            return "";
+          }
+        }
+
+        return [
+          element.value,
+          element.textContent,
+          element.getAttribute("aria-label"),
+          element.getAttribute("title"),
+          element.getAttribute("data-value"),
+        ]
+          .filter(Boolean)
+          .join(" ");
+      })
+      .join(" ");
+  };
+
+  const isFrenchHongKongPassportContext = () => {
+    if (typeof document === "undefined" || !document.body) return false;
+
+    const selectedText = normalizeText(getSelectedContextText());
+    const pageText = normalizeText(document.body.innerText || document.body.textContent || "");
+    const hasFrenchHongKong = `${selectedText}${pageText}`.includes("法国")
+      && `${selectedText}${pageText}`.includes("香港");
+    const selectedPassport = selectedText.includes("护照");
+    const labelledPassport = /证件(?:类型)?[^法人代表身份证]{0,30}护照/.test(pageText)
+      || /法人代表?证件[^法人代表身份证]{0,30}护照/.test(pageText);
+
+    return hasFrenchHongKong && (selectedPassport || labelledPassport);
+  };
+
+  const getHideTarget = (element) => {
+    const target = element.closest(
+      [
+        "[data-requirement-item]",
+        "[data-field]",
+        ".requirement-item",
+        ".requirement-row",
+        ".material-item",
+        ".field-row",
+        ".form-row",
+        "li",
+        "tr",
+      ].join(",")
+    );
+
+    if (target && target !== document.body) return target;
+
+    let current = element;
+    for (let depth = 0; depth < 4 && current.parentElement; depth += 1) {
+      const parent = current.parentElement;
+      if (parent === document.body) break;
+      if (normalizeText(parent.textContent).length <= 120) return parent;
+      current = parent;
+    }
+
+    return element;
+  };
+
+  const restoreHiddenFields = () => {
+    document.querySelectorAll(`[${HIDDEN_ATTR}='true']`).forEach((element) => {
+      element.hidden = false;
+      element.style.display = element.dataset.pltoolPreviousDisplay || "";
+      delete element.dataset.pltoolPreviousDisplay;
+      element.removeAttribute(HIDDEN_ATTR);
+    });
+  };
+
+  const hideLegalRepIdCardFields = () => {
+    restoreHiddenFields();
+
+    if (!isFrenchHongKongPassportContext()) return;
+
+    Array.from(document.querySelectorAll("label, li, tr, div, span, p"))
+      .filter((element) => {
+        const text = normalizeText(element.textContent);
+        if (!text.includes(LEGAL_REP_ID_CARD_TEXT)) return false;
+        return text.length <= 200 || ["LABEL", "LI", "TR"].includes(element.tagName);
+      })
+      .map(getHideTarget)
+      .forEach((element) => {
+        if (element.getAttribute(HIDDEN_ATTR) === "true") return;
+        element.dataset.pltoolPreviousDisplay = element.style.display || "";
+        element.setAttribute(HIDDEN_ATTR, "true");
+        element.hidden = true;
+      });
+  };
+
+  const startLegalRepIdCardFilter = () => {
+    if (!document.body) {
+      document.addEventListener("DOMContentLoaded", startLegalRepIdCardFilter, { once: true });
+      return;
+    }
+
+    let scheduled = false;
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        hideLegalRepIdCardFields();
+      });
+    };
+
+    schedule();
+    new MutationObserver(schedule).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["checked", "selected", "value", "class", "aria-selected", "data-selected"],
+    });
+    document.addEventListener("change", schedule, true);
+    document.addEventListener("input", schedule, true);
+    document.addEventListener("click", schedule, true);
+  };
+
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", startLegalRepIdCardFilter, { once: true });
+    } else {
+      startLegalRepIdCardFilter();
+    }
+  }
+})();

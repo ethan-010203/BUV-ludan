@@ -147,6 +147,34 @@
 - `cn_id_card_back` —— 中国居民身份证国徽面
 - `cn_tax_cert` —— 中国完税证明（中国税收居民身份证明）
 - `cn_company_articles` —— 中国公司章程（`France|China` 组合使用）
+- `hk_business_registration` —— 香港公司注册证书 CR / 商業登記證（`France|HongKong` 组合使用；AI 返回标签 `香港公司注册证书` → 映射到 label `香港公司注册证书CR`）
+- `passport` —— 护照（**地区无关**：识别 PASSPORT/护照 标题 + 国籍 / Nationality / 护照号 / MRZ 等护照专属字段；与 `cn_id_card_*` 在 `France|HongKong` 的 `legal_person_identity` 互斥组里"二选一"）
+
+### 2.4 `alternatives` 配置（互斥文件组，二选一）
+
+某些组合的文件清单是动态的——例如 `France|HongKong` 的法人证件可以是「身份证正反面」**或**「护照」，根据用户提供哪种来定。这种语义用 `alternatives` 数组表达：
+
+```jsonc
+"alternatives": [
+  {
+    "key": "legal_person_identity",          // 互斥组的稳定 ID（合成 missing 项的 key）
+    "label": "法人证件",                       // UI 渲染的中文名
+    "options": [                              // 各互斥 option，**全部 fileKeys 都识别到**才算该 option 满足
+      { "label": "身份证（正面+反面）", "fileKeys": ["id_card_front", "id_card_back"] },
+      { "label": "护照",                "fileKeys": ["passport"] }
+    ]
+  }
+]
+```
+
+**前置条件**：参与 alt 的 `files[].required` 应设为 `false`（它们是条件必填，由 `resolveAlternatives` 在运行时根据已识别的文件决定是否真的缺）。
+
+**运行时行为（`popup.js:resolveAlternatives`）**：
+
+1. 任一 option 的 `fileKeys` 全部命中 → 该 alt 视为满足，alt 涉及的所有 `fileKey` 从 `missing` 中剥离（多余 option 的文件不再算"必填"）；
+2. 没有任何 option 完整满足 → 同样剥离 alt 涉及的所有 `fileKey`，改为追加一条合成项 `{ key: alt.key, label: alt.label, required: true, _alternative: true, _progress: [...] }`，由 `renderMissingItems` 单独渲染成"缺少法人证件（任选其一）：身份证（正面+反面） (1/2) 或 护照 (0/1)"。
+
+**幂等性**：函数会先剥离上一轮 `_alternative` 合成项再重算，所以 `applyPlaceholder` 等多次调用不会堆积重复条目。
 
 ---
 
