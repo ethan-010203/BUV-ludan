@@ -12,6 +12,38 @@
 //   france_seller_center: () => import('./autofill/france_seller_center.js'),
 // ============================================================================
 
+// 解析"营业执照签发机关"名称的行政级别（省/市/区/县），用于页面上的单一 ant-select 下拉。
+// 该下拉只有 4 个选项：省 / 市 / 区 / 县（字面级别字，不是具体省名/市名）。
+// 取最靠近"市场监督管理 / 工商 / 市监"等核心词、最后一个出现的级别字作为答案。
+//   "深圳市市场监督管理局"        → 市
+//   "罗湖区市场监督管理局"        → 区
+//   "广东省市场监督管理局"        → 省
+//   "深圳市市场监督管理局罗湖分局" → 区（分局所属区）
+//   "丰顺县市场监管局"            → 县
+//   "国家市场监督管理总局"        → 市（兜底）
+// 入参为空 → 返回空串，让下游 select handler 因 value 为空而 "空值跳过"。
+function parseLicenseAuthorityLevel(authority) {
+  const s = String(authority || "").trim();
+  if (!s) return "";
+
+  // Pattern A: "...XX分局" → 取分局前最近的 区/县
+  const branch = s.match(/([区县])[一-龥]{0,8}分局$/);
+  if (branch) return branch[1];
+
+  // Pattern B: 取"市场/工商/市监/监督/监管/管理"核心词紧邻前面的最后一个级别字
+  // 用全局匹配找到所有 [省市区县]，再筛出位于这些核心词之前的最后一个
+  const keywordIdx = s.search(/(市场|工商|市监|监督|监管|管理)/);
+  if (keywordIdx > 0) {
+    const head = s.slice(0, keywordIdx);
+    const matches = [...head.matchAll(/[省市区县]/g)];
+    if (matches.length > 0) return matches[matches.length - 1][0];
+  }
+
+  // 兜底：取整串中最后一个级别字
+  const last = [...s.matchAll(/[省市区县]/g)].pop();
+  return last ? last[0] : "市";
+}
+
 export default {
   id: "poland_seller_center",
 
@@ -144,8 +176,6 @@ export default {
       { type: "text", key: "营业执照号码/注册号", placeholder: "请输入营业执照号码/注册号", value: get("营业执照号码/注册号") },
       // 注册资本去掉末尾的"元"（页面输入框只接受纯数字/金额）
       { type: "text", key: "注册资本", placeholder: "请输入注册资本", value: get("注册资本").replace(/元\s*$/u, "") },
-      { type: "text", key: "登记机关所在地税务局名称", placeholder: "请输入登记机关所在地税务局名称", value: get("登记机关所在地税务局名称") },
-      { type: "text", key: "登记机关所在地法院名称", placeholder: "请输入登记机关所在地法院名称", value: get("登记机关所在地法院名称") },
       // 公司邮编：与 法人邮编 共享 placeholder="请输入邮政编码"，单纯 placeholder 会命中
       // 页面上第一个匹配（DOM 顺序里公司邮编在前），所以这里加 labelText="公司/个体经营注册地址(中文)"
       // 把搜索范围限定在公司注册地址 form-item 子树内，避免和法人邮编串位。
@@ -161,13 +191,13 @@ export default {
         value: get("邮编"),
         afterPopup: true,
       },
-      // 注册地址详细（textarea）：xpath 用户提供的绝对路径（最精确），失败时回退到表单项标签查找。
+      // 注册地址详细（textarea）：antd form-item id 锁定，避免 placeholder/labelText 文案飘移。
+      // 页面：<textarea placeholder="请输入详细地址，无需重复输入省市区信息" id="0,2,4,0,0">
       {
         type: "text",
         key: "公司/个体经营注册地址(中文)-详细",
-        xpath: "/html/body/div[2]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[1]/div/div[3]/div/div[1]/div[1]/div[1]/form[3]/div/div/div[9]/div/div/div/div/div/div/div/span/div[2]/div/div/textarea",
-        labelText: "公司/个体经营注册地址(中文)",
-        elementSelector: "textarea",
+        elementSelector: '[id="0,2,4,0,0"]',
+        placeholder: "请输入详细地址，无需重复输入省市区信息",
         value: regAddrSplit.detail,
       },
 
@@ -185,13 +215,26 @@ export default {
       { type: "businessTerm", key: "营业期限", labelText: "营业期限", value: get("营业期限"), startDate: get("公司成立日期") },
 
       // --- 级联选择器 ---
-      // 营业执照签发机关 cascader 期望省/市/区。我们传入完整的"登记机关"字符串（含省+市+区前缀）
-      // 让页面侧按子串匹配各级菜单。
-      { type: "cascader", key: "营业执照签发机关", placeholder: "请选择省市区", value: get("营业执照签发机关") },
-      // 税务局地址：页面上是第一个 placeholder="请选择所在省/市/区" 的 cascader，
-      // 但页面新增了"法院地址 / 注册地址"两个同 placeholder 的 cascader 后必须用 labelText 区分。
-      { type: "cascader", key: "登记机关所在地税务局地址", placeholder: "请选择所在省/市/区", labelText: "登记机关所在地税务局地址", value: get("登记机关所在地税务局地址") },
-      { type: "cascader", key: "登记机关所在地法院地址", placeholder: "请选择所在省/市/区", labelText: "登记机关所在地法院地址", value: get("登记机关所在地法院地址") },
+      // 营业执照签发机关 = [省市区 cascader id="0,2,2,0,0"] + [行政级别 select id="0,2,2,0,1"]
+      // 两个控件分别填：
+      //   - 省市区：直接复用 公司注册地址 的 region（签发机关 99% 是公司所在地的市监局，省市区一致）；
+      //     不要用 AI 提取的"登记机关"全名（如"深圳市市场监督管理局"）—— 缺省级前缀，
+      //     cascader 第 1 级（省份）会找不到匹配项导致整体失败。
+      //   - 行政级别：从"登记机关"全名解析出单一级别字（省/市/区/县）。
+      {
+        type: "cascader",
+        key: "营业执照签发机关-省市区",
+        elementSelector: '[id="0,2,2,0,0"]',
+        placeholder: "请选择省市区",
+        value: regAddrSplit.region,
+      },
+      {
+        type: "select",
+        key: "营业执照签发机关-行政级别",
+        elementSelector: '[id="0,2,2,0,1"]',
+        placeholder: "请选择",
+        value: parseLicenseAuthorityLevel(get("营业执照签发机关")),
+      },
       { type: "cascader", key: "公司/个体经营注册地址(中文)-省市区", placeholder: "请选择所在省/市/区", labelText: "公司/个体经营注册地址(中文)", value: regAddrSplit.region },
 
       // ============================ 法人代表信息 ============================

@@ -56,10 +56,6 @@
             { "key": "营业期限",                       "source": "default",    "value": "长期" },
             { "key": "公司成立日期",                   "source": "ai_license", "aiField": "成立日期" },
             { "key": "营业执照签发机关",               "source": "ai_license", "aiField": "登记机关" },
-            { "key": "登记机关所在地税务局名称",       "source": "default",    "value": "国家税务总局" },
-            { "key": "登记机关所在地税务局地址",       "source": "default",    "value": "北京市海淀区羊坊店西路5号" },
-            { "key": "登记机关所在地法院名称",         "source": "default",    "value": "/" },
-            { "key": "登记机关所在地法院地址",         "source": "default",    "value": "北京市 / 市辖区 / 海淀区" },
             { "key": "公司/个体经营注册地址(中文)",    "source": "ai_license", "aiField": "住所" },
             { "key": "邮编",                           "source": "xlsx",       "cell": "C11" },
             { "key": "注册资本",                       "source": "ai_license", "aiField": "注册资本", "defaultValue": "100000" }
