@@ -85,7 +85,7 @@
             { "key": "店铺链接",                          "source": "xlsx",    "cell": "C14" },
             { "key": "公司（个人）店铺主要经营范围",      "source": "default", "value": "电子商品 electrical products" },
             { "key": "公司英文名称",                      "source": "xlsx",    "cell": "C4" },
-            { "key": "公司/个体经营注册地址（英文）",     "source": "xlsx",    "cell": "C6" },
+            { "key": "公司/个体经营注册地址（英文）",     "source": "xlsx",    "cell": "C5" },
             { "key": "联系邮箱",                          "source": "xlsx",    "cell": "C20" }
           ]
         }
